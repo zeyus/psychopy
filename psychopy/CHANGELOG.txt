@@ -20,6 +20,7 @@ PsychoPy 1.73.06
 * FIXED: bug with Window.setColor being incorrectly scaled for some spaces
 * FIXED: buglet preventing unicode from being used in TrialHandler parameter names (William Hogman) and saving to data files (Becky Sharman)
 * FIXED: StairHandler in Builder now saves the expInfo dictionary (Jeremy)
+* FIXED: can unpickle from either old-style or new-style data files (using psychopy.compatibility.fromFile()) (Erik Kastman)
 
 PsychoPy 1.73.05
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
