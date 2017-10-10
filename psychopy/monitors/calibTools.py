@@ -646,9 +646,10 @@ class Monitor(object):
                     # scale to 0:1
                     lumsPre[gun, :] = (old_div((lumsPre[gun, :] - lumsPre[gun, 0]),
                                        (lumsPre[gun, -1] - lumsPre[gun, 0])))
-                    self._gammaInterpolator.append(interp1d(lumsPre[gun, :],
-                                                            levelsPre,
-                                                            kind='linear'))
+                    self._gammaInterpolator.append(
+                        interpolate.interp1d(lumsPre[gun, :],
+                                             levelsPre,
+                                             kind='linear'))
                     # interpFunc = Interpolation.InterpolatingFunction(
                     #    (lumsPre[gun,:],), levelsPre)
                     # polyFunc = interpFunc.fitPolynomial(3)
@@ -675,7 +676,7 @@ class Monitor(object):
 
             # get the min,max lums
             gammaGrid = self.getGammaGrid()
-            if gammaGrid != None:
+            if gammaGrid is not None:
                 # if we have info about min and max luminance then use it
                 minLum = gammaGrid[1, 0]
                 maxLum = gammaGrid[1:4, 1]
@@ -692,8 +693,8 @@ class Monitor(object):
                 # just do the calculation using gamma
                 minLum = 0
                 maxLumR, maxLumG, maxLumB, maxLumWhite = 1, 1, 1, 1
-                gamma = self.gamma
-                gammaWhite = num.average(self.gamma)
+                gamma = self.currentCalib['gamma']
+                gammaWhite = np.average(gamma)
 
             # get the inverse gamma
             if len(desiredLums.shape) > 1:
