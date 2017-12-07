@@ -18,6 +18,7 @@ import numpy
 from scipy import optimize, special
 import inspect  # so that Handlers can find the script that called them
 import codecs
+import atexit
 import weakref
 import re
 import warnings
@@ -112,6 +113,7 @@ class ExperimentHandler(object):
 
             autoLog : True (default) or False
         """
+        ExperimentHandler._instances.add(self)
         self.loops = []
         self.loopsUnfinished = []
         self.name = name
@@ -137,16 +139,11 @@ class ExperimentHandler(object):
         else:
             # fail now if we fail at all!
             checkValidFilePath(dataFileName, makeValid=True)
+        # make sure we close and save data when Python exits
+        atexit.register(self.close)
 
     def __del__(self):
-        if self.dataFileName not in ['', None]:
-            if self.autoLog:
-                logging.debug(
-                    'Saving data for %s ExperimentHandler' % self.name)
-            if self.savePickle == True:
-                self.saveAsPickle(self.dataFileName)
-            if self.saveWideText == True:
-                self.saveAsWideText(self.dataFileName + '.csv', delim=',')
+        self.close()
 
     def addLoop(self, loopHandler):
         """Add a loop such as a :class:`~psychopy.data.TrialHandler`
@@ -376,6 +373,23 @@ class ExperimentHandler(object):
         logging.info('saved data to %s' % f.name)
         self.savePickle = savePickle
         self.saveWideText = saveWideText
+
+    def close(self):
+        """Cleanly close the experiment and save files if needed.
+
+        This method isn't usually needed by the user - it is called at exit
+        by the Python instance
+        """
+        if self.dataFileName not in ['', None]:
+            if self.autoLog:
+                logging.debug(u'Saving data for %s ExperimentHandler'
+                              % self.name)
+            if self.savePickle:
+                self.saveAsPickle(self.dataFileName)
+            if self.saveWideText:
+                self.saveAsWideText(self.dataFileName + '.csv', delim=',')
+        self.abort()
+        self.autoLog = False
 
     def abort(self):
         """Inform the ExperimentHandler that the run was aborted.
