@@ -426,7 +426,7 @@ class ColorMixin(object):
         # Ensure that we work on 0-centered color (to make negative contrast
         # values work)
         if colorSpace not in ['rgb', 'dkl', 'lms', 'hsv']:
-            rgb = (rgb / 255.0) * 2 - 1
+            rgb = rgb / 127.5 - 1
 
         # Convert to RGB in range 0:1 and scaled for contrast
         # NB glColor will clamp it to be 0-1 (whether or not we use FBO)
@@ -674,7 +674,7 @@ class TextureMixin(object):
                 res = tex.shape[0]
             if useShaders:
                 dataType = GL.GL_FLOAT
-        elif tex in (None, "none", "None"):
+        elif tex in (None, "none", "None", "color"):
             # 4x4 (2x2 is SUPPOSED to be fine but generates weird colors!)
             res = 1
             intensity = numpy.ones([res, res], numpy.float32)
@@ -722,7 +722,7 @@ class TextureMixin(object):
             rad = makeRadialMatrix(res)
             # 3sd.s by the edge of the stimulus
             invVar = (1.0 / allMaskParams['sd']) ** 2.0
-            intensity = numpy.exp(-rad**2.0 / (2.0 * invVar)) * 2 - 1
+            intensity = numpy.exp( -rad**2.0 / (2.0 * invVar)) * 2 - 1
             wasLum = True
         elif tex == "cross":
             X, Y = numpy.mgrid[-1:1:1j * res, -1:1:1j * res]
@@ -761,7 +761,7 @@ class TextureMixin(object):
             dFromEdge = numpy.abs(
                 (1 - allMaskParams['fringeWidth']) - rad[raisedCosIdx])
             dFromEdge /= numpy.max(dFromEdge)
-            dFromEdge *= numpy.round(hammingLen / 2)
+            dFromEdge *= numpy.round(hammingLen/2)
 
             # This is the indices into the hamming (larger for small distances
             # from the edge!):
@@ -791,7 +791,7 @@ class TextureMixin(object):
                     msg = "Couldn't find image %s; check path? (tried: %s)"
                     logging.error(msg % (tex, os.path.abspath(tex)))
                     logging.flush()
-                    raise IOError, msg % (tex, os.path.abspath(tex))
+                    raise IOError(msg % (tex, os.path.abspath(tex)))
                 try:
                     im = Image.open(filename)
                     im = im.transpose(Image.FLIP_TOP_BOTTOM)
@@ -800,7 +800,7 @@ class TextureMixin(object):
                     logging.error(msg % (filename))
                     logging.flush()
                     msg = "Found file '%s' [= %s], failed to load as an image"
-                    raise IOError, msg % (tex, os.path.abspath(tex))
+                    raise IOError(msg % (tex, os.path.abspath(tex)))
             else:
                 # can't be a file; maybe its an image already in memory?
                 try:
@@ -1150,8 +1150,10 @@ class WindowMixin(object):
                                   'visual.BaseVisualStim.draw')
 
     def _selectWindow(self, win):
-        # don't call switch if it's already the curr window
-        self.win._setCurrent()
+        """Switch drawing to the specified window. Calls the window's
+        _setCurrent() method which handles the switch.
+        """
+        win._setCurrent()
 
     def _updateList(self):
         """The user shouldn't need this method since it gets called
