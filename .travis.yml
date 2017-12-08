@@ -25,6 +25,7 @@ before_install:
   - travis_retry sudo -H pip install -q pillow
   - travis_retry sudo -H pip install -q pyosf
   - travis_retry sudo -H pip install -q xlrd
+  - travis_retry sudo -H pip install -q json_tricks
 #  - python -c 'import Image; print Image.PILLOW_VERSION'
   - travis_retry sudo -H pip install -qq gevent # Don't use apt-get (too old version of gevent)
   - travis_retry sudo apt-get install -qq python-yaml python-xlib
