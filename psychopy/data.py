@@ -113,7 +113,6 @@ class ExperimentHandler(object):
 
             autoLog : True (default) or False
         """
-        ExperimentHandler._instances.add(self)
         self.loops = []
         self.loopsUnfinished = []
         self.name = name
