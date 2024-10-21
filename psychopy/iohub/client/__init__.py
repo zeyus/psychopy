@@ -902,12 +902,12 @@ class ioHubConnection():
         experiment_info = None
         session_info = None
         rootScriptPath = ""
-        if "dataDirectory" not in ioHubConfig:
+        if "data_directory" not in ioHubConfig:
             rootScriptPath = os.path.dirname(sys.argv[0])
             if len(rootScriptPath)<=1:
                 rootScriptPath = os.path.abspath(".")
         else:
-            rootScriptPath = ioHubConfig["dataDirectory"]
+            rootScriptPath = ioHubConfig["data_directory"]
         # >>>>> Load / Create / Update iohub config file.....
         cfpath = os.path.join(IOHUB_DIRECTORY, 'default_config.yaml')
         with open(cfpath, 'r') as config_file:

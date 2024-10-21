@@ -43,6 +43,8 @@ def launchHubServer(**kwargs):
         code (<=256 chars), name (<=256 chars), comments (<=4096 chars), user_variables (dict)
     datastore_name : str
         Used to provide an ioHub HDF5 file name different than the session_code.
+    data_directory : str
+        Used to specify the directory where data is stored.
     window : :class:`psychopy.visual.Window`
         The psychoPy experiment window being used. Information like display size, viewing distance,
         coord / color type is used to update the ioHub Display device.
@@ -132,6 +134,13 @@ def launchHubServer(**kwargs):
             del kwargs['datastore_name']
         elif session_code:
             datastore_name = session_code
+    
+    data_directory = kwargs.get('data_directory', None)
+    if data_directory:
+        del kwargs['data_directory']
+        if not os.path.isdir(data_directory):
+            msg = f"launchHubServer: data_directory '{data_directory}' does not exist."
+            raise ValueError(msg)
 
     monitor_devices_config = None
     iohub_conf_file_name = kwargs.get('iohub_config_name')
@@ -239,6 +248,9 @@ def launchHubServer(**kwargs):
             
     # Create an ioHub configuration dictionary.
     iohub_config['monitor_devices'] = device_list
+
+    if data_directory:
+        iohub_config['data_directory'] = data_directory
 
     if _DATA_STORE_AVAILABLE and (datastore_name or session_code):
         # If datastore_name kwarg or experiment code has been provided,
