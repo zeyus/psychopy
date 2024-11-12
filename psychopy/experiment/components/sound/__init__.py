@@ -21,29 +21,38 @@ class SoundComponent(BaseDeviceComponent):
     iconFile = Path(__file__).parent / 'sound.png'
     tooltip = _translate('Sound: play recorded files or generated sounds', )
     deviceClasses = ["psychopy.hardware.speaker.SpeakerDevice"]
+    validatorClasses = ["AudioValidatorRoutine"]
 
-    def __init__(self,
-                 exp, parentName,
-                 # basic
-                 name='sound_1',
-                 sound='A',
-                 startType='time (s)', startVal='0.0',
-                 stopType='duration (s)', stopVal='1.0',
-                 startEstim='', durationEstim='',
-                 syncScreenRefresh=True,
-                 # device
-                 deviceLabel="",
-                 speakerIndex=-1,
-                 # playback
-                 volume=1,
-                 stopWithRoutine=True,
-                 forceEndRoutine=False):
+    def __init__(
+        self,
+        exp, parentName,
+        # basic
+        name='sound_1',
+        sound='A',
+        startType='time (s)', startVal='0.0',
+        stopType='duration (s)', stopVal='1.0',
+        startEstim='', durationEstim='',
+        syncScreenRefresh=True,
+        # device
+        deviceLabel="",
+        speakerIndex=-1,
+        resampling="load",
+        exclusive=False,
+        # playback
+        volume=1,
+        stopWithRoutine=True,
+        forceEndRoutine=False,
+        # testing
+        validator="",
+        disabled=False,
+    ):
         super(SoundComponent, self).__init__(
             exp, parentName, name,
             startType=startType, startVal=startVal,
             stopType=stopType, stopVal=stopVal,
             startEstim=startEstim, durationEstim=durationEstim,
-            deviceLabel=deviceLabel
+            deviceLabel=deviceLabel,
+            disabled=disabled
         )
         self.type = 'Sound'
         self.url = "https://www.psychopy.org/builder/components/sound.html"
@@ -110,7 +119,9 @@ class SoundComponent(BaseDeviceComponent):
 
         # --- Device params ---
         self.order += [
-            "speakerIndex"
+            "speakerIndex",
+            "resampling",
+            "exclusive",
         ]
         def getSpeakerLabels():
             from psychopy.hardware.speaker import SpeakerDevice
@@ -136,6 +147,37 @@ class SoundComponent(BaseDeviceComponent):
                 "What speaker to play this sound on"
             ),
             label=_translate("Speaker"))
+        self.params['resampling'] = Param(
+            resampling, valType="str", inputType="choice", categ="Device",
+            allowedVals=["load", "play", "none"],
+            allowedLabels=[
+                _translate("On load"), _translate("When playing"), _translate("Do not resample")
+            ],
+            label=_translate("Resampling"),
+            hint=_translate(
+                "If the sample rate of a clip doesn't match the sample rate of the speaker, when "
+                "should resampling happen?"
+            )
+        )
+        self.params['exclusive'] = Param(
+            exclusive, valType="code", inputType="bool", categ="Device",
+            label=_translate("Exclusive control"),
+            hint=_translate(
+                "Take exclusive control of the speaker, so other apps can't use it during your "
+                "experiment."
+            )
+        )
+
+        # --- Testing ---
+        self.params['validator'] = Param(
+            validator, valType="code", inputType="choice", categ="Testing",
+            allowedVals=self.getAllValidatorRoutineVals,
+            allowedLabels=self.getAllValidatorRoutineLabels,
+            label=_translate("Validate with..."),
+            hint=_translate(
+                "Name of validator Component/Routine to use to check the timing of this stimulus."
+            )
+        )
 
     def writeDeviceCode(self, buff):
         inits = getInitVals(self.params)
@@ -145,7 +187,9 @@ class SoundComponent(BaseDeviceComponent):
             "deviceManager.addDevice(\n"
             "    deviceName=%(deviceLabel)s,\n"
             "    deviceClass='psychopy.hardware.speaker.SpeakerDevice',\n"
-            "    index=%(speakerIndex)s\n"
+            "    index=%(speakerIndex)s,\n"
+            "    resampling=%(resampling)s,\n"
+            "    exclusive=%(exclusive)s,\n"
             ")\n"
         )
         buff.writeOnceIndentedLines(code % inits)
