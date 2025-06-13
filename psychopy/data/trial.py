@@ -811,18 +811,27 @@ class Trial(dict):
             'data': {key: val for key, val in self.items()},
         }
     
-    def getJSON(self):
+    def getJSON(self, asString=False):
         """
         Serialize this Trial to a JSON format.
+
+        Parameters
+        ----------
+        asString : bool
+            If True, convert the returned object to a string. If False, keep as a dict.
 
         Returns
         -------
         str
             The results of Trial.getDict expressed as a JSON string
         """
-        return json.dumps(
-            self.getDict()
-        )
+        # get self as a dict
+        data = self.getDict()
+        # convert to string if requested
+        if asString:
+            data = json.dumps(data)
+        
+        return data
 
 
 class TrialHandler2(_BaseTrialHandler):
@@ -843,16 +852,19 @@ class TrialHandler2(_BaseTrialHandler):
     Then you'll find that `dat` has the following attributes that
     """
 
-    def __init__(self,
-                 trialList,
-                 nReps,
-                 method='random',
-                 dataTypes=None,
-                 extraInfo=None,
-                 seed=None,
-                 originPath=None,
-                 name='',
-                 autoLog=True):
+    def __init__(
+        self,
+        trialList,
+        nReps,
+        method='random',
+        dataTypes=None,
+        extraInfo=None,
+        seed=None,
+        originPath=None,
+        isTrials=True,
+        name='',
+        autoLog=True
+    ):
         """
 
         :Parameters:
@@ -920,10 +932,14 @@ class TrialHandler2(_BaseTrialHandler):
 
             .origin - the contents of the script or builder experiment that
                 created the handler
+            
+            .isTrials - is this controlling trials, or created for another purpose (e.g. iterating a 
+                stimulus within a trial)?
 
         """
         self.name = name
         self.autoLog = autoLog
+        self.isTrials = isTrials
 
         if trialList in [None, [None], []]:  # user wants an empty trialList
             # which corresponds to a list with a single empty entry
@@ -958,6 +974,7 @@ class TrialHandler2(_BaseTrialHandler):
         self.elapsedTrials = []
         self.upcomingTrials = None
         self.thisTrial = None
+        self._cancelNextIteration = False
 
         self.originPath, self.origin = self.getOriginPathAndFile(originPath)
         self._exp = None  # the experiment handler that owns me!
@@ -1013,7 +1030,12 @@ class TrialHandler2(_BaseTrialHandler):
         # We want to ignore the RNG object when doing the comparison.
         self_copy = copy.deepcopy(self)
         other_copy = copy.deepcopy(other)
-        del self_copy._rng, other_copy._rng
+        
+        # Only delete _rng if it exists
+        if hasattr(self_copy, '_rng'):
+            del self_copy._rng
+        if hasattr(other_copy, '_rng'):
+            del other_copy._rng
 
         result = super(TrialHandler2, self_copy).__eq__(other_copy)
         return result
@@ -1048,6 +1070,10 @@ class TrialHandler2(_BaseTrialHandler):
                     break  # break out of the forever loop
                 # do stuff here for the trial
         """
+        # if we've just rewound/skipped trials, skip just this time
+        if self._cancelNextIteration:
+            self._cancelNextIteration = False
+            return self.thisTrial
         # mark previous trial as elapsed
         if self.thisTrial is not None:
             self.elapsedTrials.append(self.thisTrial)
@@ -1246,8 +1272,6 @@ class TrialHandler2(_BaseTrialHandler):
         n : int
             Number of trials to skip ahead
         """
-        # account for the fact current trial will end once skipped
-        n -= 1
         # if skipping past last trial, print warning and skip to last trial
         if n > len(self.upcomingTrials):
             logging.warn(
@@ -1259,7 +1283,7 @@ class TrialHandler2(_BaseTrialHandler):
         self.thisTrial.status = constants.STOPPING
         # before iterating, add "skipped" to data
         self.addData("skipped", True)
-        # iterate n times (-1 to account for current trial)
+        # iterate n times
         for i in range(n):
             self.__next__()
             # before iterating, add "skipped" to data
@@ -1267,6 +1291,9 @@ class TrialHandler2(_BaseTrialHandler):
             # advance row in data file
             if self.getExp() is not None:
                 self.getExp().nextEntry()
+        # mark as recently skipped so the next iteration (if there is one) is cancelled
+        if n or len(self.upcomingTrials):
+            self._cancelNextIteration = True
 
         return self.thisTrial   
 
@@ -1282,26 +1309,31 @@ class TrialHandler2(_BaseTrialHandler):
         """
         # treat -n as n
         n = abs(n)
-        # account for the fact current trial will end once skipped
-        n += 1
         # if rewinding past first trial, print warning and rewind to first trial
         if n > len(self.elapsedTrials):
             logging.warn(
                 f"Requested rewind of {n} trials when only {len(self.elapsedTrials)} trials have "
-                f"elapsed. Rewinding to the first trial."
+                f"elapsed. Rewinding to before the first trial."
             )
             n = len(self.elapsedTrials)
-        # mark current trial as skipping so it ends
-        self.thisTrial.status = constants.STOPPING
         # start with no trials
-        rewound = [self.thisTrial]
+        if self.thisTrial is None:
+            rewound = []
+        else:
+            rewound = [self.thisTrial]
+            # mark as skipping so routines end
+            self.thisTrial.status = constants.STOPPING
         # pop the last n values from elapsed trials
         for i in range(n):
             rewound = [self.elapsedTrials.pop(-1)] + rewound
-        # set thisTrial from first rewound value
-        self.thisTrial = rewound.pop(0)
+        # clear thisTrial so we progress to the first rewound trial
+        self.thisTrial = None
         # prepend rewound trials to upcoming array
         self.upcomingTrials = rewound + self.upcomingTrials
+        # progress so we get the first upcoming trial
+        self.__next__()
+        # mark as recently rewound so the next iteration is cancelled
+        self._cancelNextIteration = True
 
         return self.thisTrial
     

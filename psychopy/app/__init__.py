@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Module for the PsychoPy GUI application.
@@ -118,7 +118,10 @@ def startApp(
 
         # NOTE - messages and errors cropping up before this point will go to
         # console, afterwards to 'last_app_load.log'.
-        sys.stderr = sys.stdout = _Tee(lastRunLog)  # redirect output to file
+        if sys.platform == 'win32' and sys.executable.endswith('pythonw.exe'):
+            sys.stderr = sys.stdout = lastRunLog
+        else:
+            sys.stderr = sys.stdout = _Tee(lastRunLog)  # redirect output to file
 
     # Create the application instance which starts loading it.
     # If `testMode==True`, all messages and errors (i.e. exceptions) will log to

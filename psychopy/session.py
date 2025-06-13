@@ -292,14 +292,23 @@ class Session:
             # If win is the name of an experiment, setup from that experiment's method
             self.win = None
             self.setupWindowFromExperiment(win)
-        # Setup Session clock
+        # setup experiment clock
         if clock in (None, "float"):
             clock = core.Clock()
         elif clock == "iso":
             clock = core.Clock(format=str)
         elif isinstance(clock, str):
             clock = core.Clock(format=clock)
-        self.sessionClock = clock
+        self.experimentClock = clock
+        # setup session clock (same format as experiment clock)
+        if clock in (None, "float"):
+            self.sessionClock = core.Clock()
+        elif clock == "iso":
+            self.sessionClock = core.Clock(format=str)
+        elif isinstance(clock, str):
+            self.sessionClock = core.Clock(format=clock)
+        else:
+            self.sessionClock = core.Clock()
         # make sure we have a default keyboard
         if DeviceManager.getDevice("defaultKeyboard") is None:
             DeviceManager.addDevice(
@@ -1060,14 +1069,22 @@ class Session:
             "Running experiment via Session: name={key}, expInfo={expInfo}"
         ).format(key=key, expInfo=expInfo))
         # reset session clock
-        self.sessionClock.reset()
+        self.experimentClock.reset()
+        # send start event to liaison
+        if self.liaison is not None:
+            self.sendToLiaison({
+                    'type': "experiment_status",
+                    'name': thisExp.name,
+                    'status': constants.STARTED,
+                    'expInfo': expInfo
+                })
         # Run this experiment
         try:
             self.experiments[key].run(
                 expInfo=expInfo,
                 thisExp=thisExp,
                 win=self.win,
-                globalClock=self.sessionClock,
+                globalClock=self.experimentClock,
                 thisSession=self
             )
         except Exception as _err:
@@ -1247,6 +1264,13 @@ class Session:
 
         # set ExperimentHandler status to PAUSED
         self.currentExperiment.pause()
+        # update Liaison if needed
+        if self.liaison is not None:
+            self.sendToLiaison({
+                'type': "experiment_status",
+                'name': self.currentExperiment.name,
+                'status': self.currentExperiment.status,
+            })
 
         return True
 
@@ -1268,6 +1292,13 @@ class Session:
             return False
         # set ExperimentHandler status to STARTED
         self.currentExperiment.resume()
+        # update Liaison if needed
+        if self.liaison is not None:
+            self.sendToLiaison({
+                'type': "experiment_status",
+                'name': self.currentExperiment.name,
+                'status': self.currentExperiment.status,
+            })
 
         return True
 
@@ -1288,8 +1319,25 @@ class Session:
             )
             return False
         self.currentExperiment.stop()
+        # update Liaison if needed
+        if self.liaison is not None:
+            self.sendToLiaison({
+                'type': "experiment_status",
+                'name': self.currentExperiment.name,
+                'status': self.currentExperiment.status,
+            })
 
         return True
+    
+    def next(self):
+        """
+        Move on to either the next trial (if in a trials loop) or the next Routine.
+        """
+        # return if there's no current experiment
+        if self.currentExperiment is None:
+            return
+        # skip trials in current loop
+        return self.currentExperiment.next()
 
     def skipTrials(self, n=1):
         """

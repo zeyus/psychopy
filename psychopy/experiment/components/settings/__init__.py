@@ -7,6 +7,7 @@ from pathlib import Path
 from xml.etree.ElementTree import Element
 import re
 from psychopy import logging, plugins
+from psychopy.preferences import prefs
 from psychopy.experiment.components import Param, _translate
 from psychopy.experiment.components.settings.eyetracking import knownEyetrackerBackends
 from psychopy.experiment.routines import Routine, BaseStandaloneRoutine
@@ -48,6 +49,9 @@ keyboardBackendMap = {
     "Pyglet": "event"
 }
 
+# possible expInfo keys for participant ID
+participantIdAliases = ('participant', 'Participant', 'Subject', 'Observer')
+
 
 # # customize the Proj ID Param class to
 # class ProjIDParam(Param):
@@ -77,12 +81,14 @@ class SettingsComponent:
     plugin = None
     version = "0.0.0"
     beta = False
+    # an experiment only has one SettingsComponent, so hide it from the Components panel
+    hidden = True
 
     def __init__(
             self, parentName, exp, expName='', fullScr=True, runMode=0, rush=False,
             winSize=(1024, 768), screen=1, monitor='testMonitor', winBackend='pyglet',
             showMouse=False, saveLogFile=True, showExpInfo=True,
-            expInfo="{'participant':'f\"{randint(0, 999999):06.0f}\"', 'session':'001'}",
+            expInfo="{'participant':'f\"{randint(0, 999999):06.0f}\"', 'session':'\"001\"'}",
             units='height', 
             logging="info", 
             consoleLoggingLevel="warning",
@@ -117,7 +123,7 @@ class SettingsComponent:
             plCompanionAddress="neon.local",
             plCompanionPort=8080,
             ecSampleRate='default',
-            keyboardBackend="ioHub",
+            keyboardBackend="PsychToolbox",
             filename=None, exportHTML='on Sync',
             endMessage=_translate("Thank you for your patience.")
     ):
@@ -142,7 +148,7 @@ class SettingsComponent:
         self.depends = []
         self.order = [
                       'expName', 'expVersion',
-                      'Audio lib', 'Audio latency priority', "Force stereo",  # Audio tab
+                      'Audio lib', "Force stereo",  # Audio tab
                       'HTML path', 'exportHTML', 'Completed URL', 'Incomplete URL', 'End Message', 'Resources',  # Online tab
                       ]
         self.depends = []
@@ -378,20 +384,6 @@ class SettingsComponent:
             allowedVals=['ptb', 'pyo', 'sounddevice', 'pygame'],
             hint=_translate("Which Python sound engine do you want to play your sounds?"),
             label=_translate("Audio library"), categ='Audio')
-
-        audioLatencyLabels = [
-            '0: ' + _translate('Latency not important'),
-            '1: ' + _translate('Share low-latency driver'),
-            '2: ' + _translate('Exclusive low-latency'),
-            '3: ' + _translate('Aggressive low-latency'),
-            '4: ' + _translate('Latency critical'),
-        ]
-        self.params['Audio latency priority'] = Param(
-            '3', valType='str', inputType="choice",
-            allowedVals=['0', '1', '2', '3', '4'],
-            allowedLabels=audioLatencyLabels,
-            hint=_translate("How important is audio latency for you? If essential then you may need to get all your sounds in correct formats."),
-            label=_translate("Audio latency priority"), categ='Audio')
 
         # --- Data params ---
         self.order += [
@@ -920,10 +912,6 @@ class SettingsComponent:
             buff.writelines(
                 "prefs.hardware['audioLib'] = {}\n".format(self.params['Audio lib'])
             )
-        if self.params['Audio latency priority'].val.lower() != 'use prefs':
-            buff.writelines(
-                "prefs.hardware['audioLatencyMode'] = {}\n".format(self.params['Audio latency priority'])
-            )
         buff.write(
             "from psychopy import %s\n" % ', '.join(psychopyImports) +
             "from psychopy.tools import environmenttools\n"
@@ -1034,6 +1022,14 @@ class SettingsComponent:
             "        _winSize = prefs.piloting['forcedWindowSize']\n"
         )
         buff.writeIndented(code % self.params)
+        for key, value in expInfo.items():
+            if key in participantIdAliases:
+                code = (
+            f"    # replace default participant ID\n"
+            f"    if prefs.piloting['replaceParticipantID']:\n"
+            f"        expInfo['{key}'] = 'pilot'\n"
+                )
+                buff.writeIndented(code % self.params)
 
     def prepareResourcesJS(self):
         """Sets up the resources folder and writes the info.php file for PsychoJS
@@ -1160,6 +1156,7 @@ class SettingsComponent:
         code = ("\n// store info about the experiment session:\n"
                 "let expName = '%s';  // from the Builder filename that created this script\n"
                 "let expInfo = %s;\n"
+                "let PILOTING = util.getUrlParameters().has('__pilotToken');\n"
                 "\n" % (jsFilename, expInfoStr))
         buff.writeIndentedLines(code)
 
@@ -1246,7 +1243,7 @@ class SettingsComponent:
 
         # figure out participant id field (if any)
         participantVal = ''
-        for target in ('participant', 'Participant', 'Subject', 'Observer'):
+        for target in participantIdAliases:
             if target in self.getInfo(removePipeSyntax=True):
                 participantVal = " + expInfo['%s']" % target
                 break
@@ -1771,14 +1768,17 @@ class SettingsComponent:
             "    )\n"
         )
         buff.writeIndentedLines(code % inits)
-        # write any device setup code required by a component
-        for rt in self.exp.flow:
-            if isinstance(rt, Routine):
-                for comp in rt:
-                    if hasattr(comp, "writeDeviceCode"):
-                        comp.writeDeviceCode(buff)
-            elif isinstance(rt, BaseStandaloneRoutine):
-                rt.writeDeviceCode(buff)
+        # setup devices from config
+        for deviceName in self.exp.getRequiredDeviceNames():
+            if deviceName in prefs.devices:
+                # write device setup if possile
+                prefs.devices[deviceName].writeDeviceCode(buff)
+            elif deviceName is None:
+                # if default, let init code handle device
+                pass
+            else:
+                # alert if not
+                alert(4810, strFields={'deviceName': deviceName})
 
         code = (
             "# return True if completed successfully\n"
@@ -1915,11 +1915,15 @@ class SettingsComponent:
         )
         buff.writeIndentedLines(code)
 
-        # show/hide pilot indicator
+        # post-init window adjustments for piloting mode
         code = (
-            "# show a visual indicator if we're in piloting mode\n"
-            "if PILOTING and prefs.piloting['showPilotingIndicator']:\n"
-            "    win.showPilotingIndicator()\n"
+            "if PILOTING:\n"
+            "    # show a visual indicator if we're in piloting mode\n"
+            "    if prefs.piloting['showPilotingIndicator']:\n"
+            "        win.showPilotingIndicator()\n"
+            "    # always show the mouse in piloting mode\n"
+            "    if prefs.piloting['forceMouseVisible']:\n"
+            "        win.mouseVisible = True\n"
         )
         buff.writeIndentedLines(code)
 
@@ -2004,9 +2008,9 @@ class SettingsComponent:
         buff.writeIndentedLines(code)
 
     def writePauseCode(self, buff):
-        # Open function def
+        # open function def for pause
         code = (
-            'def pauseExperiment(thisExp, win=None, timers=[], playbackComponents=[]):\n'
+            'def pauseExperiment(thisExp, win=None, timers=[], currentRoutine=None):\n'
             '    """\n'
             '    Pause this experiment, preventing the flow from advancing to the next routine until resumed.\n'
             '    \n'
@@ -2019,9 +2023,9 @@ class SettingsComponent:
             '        Window for this experiment.\n'
             '    timers : list, tuple\n'
             '        List of timers to reset once pausing is finished.\n'
-            '    playbackComponents : list, tuple\n'
-            '        List of any components with a `pause` method which need to be paused.\n'
-            '    """'
+            '    currentRoutine : psychopy.data.Routine\n'
+            '        Current Routine we are in at time of pausing, if any. This object tells PsychoPy what Components to pause/play/dispatch.\n'
+            '    """\n'
         )
         buff.writeIndentedLines(code)
         buff.setIndentLevel(+1, relative=True)
@@ -2035,8 +2039,9 @@ class SettingsComponent:
             "# start a timer to figure out how long we're paused for\n"
             "pauseTimer = core.Clock()\n"
             "# pause any playback components\n"
-            "for comp in playbackComponents:\n"
-            "    comp.pause()\n"
+            "if currentRoutine is not None:\n"
+            "    for comp in currentRoutine.getPlaybackComponents():\n"
+            "        comp.pause()\n"
             "# make sure we have a keyboard\n"
             "defaultKeyboard = deviceManager.getDevice('defaultKeyboard')\n"
             "if defaultKeyboard is None:\n"
@@ -2055,21 +2060,25 @@ class SettingsComponent:
             "        endExperiment(thisExp, win=win)\n"
             )
         code += (
+            "    # dispatch messages on response components\n"
+            "    if currentRoutine is not None:\n"
+            "        for comp in currentRoutine.getDispatchComponents():\n"
+            "            comp.device.dispatchMessages()\n"
             "    # sleep 1ms so other threads can execute\n"
             "    clock.time.sleep(0.001)\n"
             "# if stop was requested while paused, quit\n"
             "if thisExp.status == FINISHED:\n"
             "    endExperiment(thisExp, win=win)\n"
             "# resume any playback components\n"
-            "for comp in playbackComponents:\n"
-            "    comp.play()\n"
+            "if currentRoutine is not None:\n"
+            "    for comp in currentRoutine.getPlaybackComponents():\n"
+            "        comp.play()\n"
             "# reset any timers\n"
             "for timer in timers:\n"
             "    timer.addTime(-pauseTimer.getTime())\n"
         )
         buff.writeIndentedLines(code % self.params)
-
-        # Exit function def
+        # exit function def
         buff.setIndentLevel(-1, relative=True)
         buff.writeIndentedLines("\n")
 

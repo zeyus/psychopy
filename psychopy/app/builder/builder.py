@@ -4,7 +4,7 @@
 """
 Defines the behavior of Psychopy's Builder view window
 Part of the PsychoPy library
-Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 Distributed under the terms of the GNU General Public License (GPL).
 """
 import collections
@@ -36,6 +36,7 @@ from ..pavlovia_ui.project import ProjectFrame
 from ..pavlovia_ui.search import SearchFrame
 from ..pavlovia_ui.user import UserFrame
 from ..pavlovia_ui.functions import logInPavlovia
+from ..deviceManager import DeviceManagerDlg
 from ...experiment import getAllElements, getAllCategories
 from ...experiment.routines import Routine, BaseStandaloneRoutine
 from psychopy.tools.versionchooser import parseVersionSafely, psychopyVersion
@@ -76,9 +77,11 @@ from psychopy.scripts.psyexpCompile import generateScript
 
 # Components which are always hidden
 alwaysHidden = [
-    'SettingsComponent', 'RoutineSettingsComponent', 'UnknownComponent', 'UnknownRoutine',
-    'UnknownStandaloneRoutine', 'UnknownPluginComponent', 'BaseComponent', 'BaseStandaloneRoutine',
-    'BaseValidatorRoutine'
+    'BaseComponent', 
+    'BaseDeviceComponent',
+    'BaseStandaloneRoutine', 
+    'BaseDeviceRoutine',
+    'BaseValidatorRoutine',
 ]
 
 
@@ -134,7 +137,7 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.generateScript = generateScript
 
         # default window title
-        self.winTitle = 'PsychoPy Builder (v{})'.format(self.app.version)
+        self.winTitle = title
 
         if fileName in self.appData['frames']:
             self.frameData = self.appData['frames'][fileName]
@@ -325,7 +328,7 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.menuIDs.ID_REVEAL = wx.NewIdRef(count=1)
         menu.Append(
             self.menuIDs.ID_REVEAL,
-            _translate("Reveal in file explorer..."),
+            _translate("Reveal in file explorer...\t%s") % keys['revealFolder'],
             _translate("Open the folder containing this experiment in your system's file explorer")
         )
         self.Bind(wx.EVT_MENU, self.fileReveal, id=self.menuIDs.ID_REVEAL)
@@ -372,6 +375,13 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.Bind(wx.EVT_MENU, self.redo, id=wx.ID_REDO)
         menu.Append(wx.ID_PASTE, _translate("&Paste\t%s") % keys['paste'])
         self.Bind(wx.EVT_MENU, self.paste, id=wx.ID_PASTE)
+
+        item = menu.Append(
+            wx.ID_ANY,
+            _translate("&Find in experiment...\t%s") % keys['builderFind'],
+            _translate("Search the whole experiment for a specific term")
+        )
+        self.Bind(wx.EVT_MENU, self.onFindInExperiment, item)
 
         # ---_view---#000000#FFFFFF-------------------------------------------
         self.viewMenu = wx.Menu()
@@ -465,6 +475,13 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.expMenu = wx.Menu()
         menuBar.Append(self.expMenu, _translate('E&xperiment'))
         menu = self.expMenu
+
+        item = menu.Append(wx.ID_ANY,
+                           _translate("Experiment &Settings\t%s") % keys['expSettings'],
+                           _translate("Edit experiment settings"))
+        self.Bind(wx.EVT_MENU, self.setExperimentSettings, item)
+        menu.AppendSeparator()
+        
         item = menu.Append(wx.ID_ANY,
                            _translate("&New Routine\t%s") % keys['newRoutine'],
                            _translate("Create a new routine (e.g. the trial "
@@ -510,11 +527,6 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
                            _translate("Create a new loop in your flow window"))
         self.Bind(wx.EVT_MENU, self.flowPanel.canvas.insertLoop, item)
         menu.AppendSeparator()
-
-        item = menu.Append(wx.ID_ANY,
-                           _translate("&Find in experiment...\t%s") % keys['builderFind'],
-                           _translate("Search the whole experiment for a specific term"))
-        self.Bind(wx.EVT_MENU, self.onFindInExperiment, item)
 
         item = menu.Append(wx.ID_ANY,
                            _translate("README..."),
@@ -592,6 +604,12 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.Bind(wx.EVT_MENU, self.app.showNews, id=item.GetId())
 
         self.SetMenuBar(menuBar)
+    
+    def openDeviceManager(self, evt=None):
+        # create a device manager dialog
+        dlg = DeviceManagerDlg(self)
+        # show it modal to this window
+        dlg.ShowModal()
 
     def commandCloseFrame(self, event):
         """Defines Builder Frame Closing Event"""
@@ -1030,10 +1048,8 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
             ok = self.checkSave()
             if not ok:
                 return False  # user cancelled
-        if self.filename is None:
-            frameData = self.appData['defaultFrame']
-        else:
-            frameData = dict(self.appData['defaultFrame'])
+        frameData = self.appData['defaultFrame']
+        if self.fileExists:
             self.appData['prevFiles'].append(self.filename)
 
             # get size and window layout info
@@ -1065,7 +1081,11 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.appData['fileHistory'] = copy.copy(tmp[-fhMax:])
 
         # assign the data to this filename
-        self.appData['frames'][str(self.filename)] = frameData
+        if (
+            str(self.filename) not in self.appData['frames']
+            and str(self.filename) not in self.appData
+        ):
+            self.appData['frames'][str(self.filename)] = frameData
         # save the display data only for those frames in the history:
         tmp2 = {}
         for f in self.appData['frames']:
@@ -2496,6 +2516,8 @@ class RoutineCanvas(wx.ScrolledWindow, handlers.ThemeMixin):
             maxDur, useMax = self.routine.settings.getDuration()
             overspill = 0
             if useMax:
+                if maxDur is None:
+                    maxDur = duration
                 overspill = max(duration - maxDur, 0)
                 duration = min(maxDur, duration)
             # If there's a fixed end time and no start time, start 20px before 0
@@ -2714,6 +2736,7 @@ class StandaloneRoutineCanvas(scrolledpanel.ScrolledPanel):
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.SetSizer(self.sizer)
         # Setup categ notebook
+        self.warnings = WarningManager(self)
         self.ctrls = ParamNotebook(self, experiment=self.frame.exp, element=routine)
         self.paramCtrls = self.ctrls.paramCtrls
         self.sizer.Add(self.ctrls, border=12, proportion=1, flag=wx.ALIGN_CENTER | wx.TOP)
@@ -2723,10 +2746,9 @@ class StandaloneRoutineCanvas(scrolledpanel.ScrolledPanel):
         self.helpBtn.Bind(wx.EVT_BUTTON, self.onHelp)
         self.btnsSizer.Add(self.helpBtn, border=6, flag=wx.ALL | wx.EXPAND)
         self.btnsSizer.AddStretchSpacer(1)
-        # Add validator stuff
-        self.warnings = WarningManager(self)
+        # add warnings to sizer
         self.sizer.Add(self.warnings.output, border=3, flag=wx.EXPAND | wx.ALL)
-        # Add buttons to sizer
+        # add buttons to sizer
         self.sizer.Add(self.btnsSizer, border=3, proportion=0, flag=wx.EXPAND | wx.ALL)
         # Style
         self.SetupScrolling(scroll_y=True)
@@ -3246,6 +3268,9 @@ class ComponentsPanel(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
                         shown = False
                 # Check whether button is hidden by prefs
                 if name in prefs.builder['hiddenComponents'] + alwaysHidden:
+                    shown = False
+                # check whether comp/rt indicates itsef as hidden
+                if emt.hidden:
                     shown = False
                 # Check whether button refers to a future comp/rt
                 if hasattr(emt, "version"):
@@ -4512,6 +4537,12 @@ class BuilderRibbon(ribbon.FrameRibbon):
             tooltip=_translate("Redo last action"),
             callback=parent.redo
         )
+        # find
+        self.addButton(
+            section="edit", name="find", label=_translate("Find"), icon="find",
+            tooltip=_translate("Search the whole experiment for a specific term"),
+            callback=parent.onFindInExperiment
+        )
 
         self.addSeparator()
 
@@ -4525,6 +4556,13 @@ class BuilderRibbon(ribbon.FrameRibbon):
             icon="monitors",
             tooltip=_translate("Monitor settings and calibration"),
             callback=parent.app.openMonitorCenter
+        )
+        # device manager
+        self.addButton(
+            section="experiment", name='devices', label=_translate('Device manager'),
+            icon="devices",
+            tooltip=_translate("Map devices from this machine to names in your experiment"),
+            callback=parent.openDeviceManager
         )
         # settings
         self.addButton(

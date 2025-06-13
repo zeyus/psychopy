@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Tools for working with packages within the Python environment.
@@ -22,6 +22,7 @@ __all__ = [
 ]
 
 
+from pathlib import Path
 import subprocess as sp
 from psychopy.preferences import prefs
 from psychopy.localization import _translate
@@ -58,51 +59,6 @@ _installedPackageNamesCache = []
 
 # reference the user packages path
 USER_PACKAGES_PATH = str(prefs.paths['userPackages'])
-
-
-class PluginRequiredError(Exception):
-    pass
-
-
-class PluginStub:
-    """
-    Class to handle classes which have moved out to plugins.
-
-    Example
-    -------
-    ```
-    class NoiseStim(PluginStub, plugin="psychopy-visionscience", doclink="https://psychopy.github.io/psychopy-visionscience/builder/components/NoiseStimComponent/):
-    ```
-    """
-
-    def __init_subclass__(cls, plugin, doclink="https://plugins.psychopy.org/directory.html"):
-        """
-        Subclassing PluginStub will create documentation pointing to the new documentation for the replacement class.
-        """
-        # store ref to plugin and docs link
-        cls.plugin = plugin
-        cls.doclink = doclink
-        # create doc string point to new location
-        cls.__doc__ = (
-            "`{mro}` is now located within the `{plugin}` plugin. You can find the documentation for it `here <{doclink}>`_."
-        ).format(
-            mro=cls.__module__,
-            plugin=plugin,
-            doclink=doclink
-        )
-
-
-    def __init__(self, *args, **kwargs):
-        """
-        When initialised, rather than creating an object, will log an error.
-        """
-        raise PluginRequiredError((
-            "Support for `{mro}` is not available this session. Please install "
-            "`{plugin}` and restart the session to enable support."
-        ).format(
-            mro=type(self).__module__,
-            plugin=self.plugin,
-        ))
 
 
 def refreshPackages():
@@ -256,9 +212,24 @@ def installPackage(
     # convert extra to dict
     if extra is None:
         extra = {}
-
+    # assume non-editable
+    editable = []
+    # handle install from file
+    try:
+        packagePath = Path(package)
+    except:
+        pass
+    else:
+        if packagePath.is_file():
+            # if file is a pyproject.toml, use the containing folder
+            if packagePath.name == "pyproject.toml":
+                packagePath = packagePath.parent
+                package = str(packagePath)
+        if packagePath.is_dir():
+            # if given a folder, add quotation marks and an editable flag
+            editable.append("-e")
     # construct the pip command and execute as a subprocess
-    cmd = [sys.executable, "-m", "pip", "install", package]
+    cmd = [sys.executable, "-m", "pip", "install", *editable, package]
 
     # optional args
     if target is None:  # default to user packages dir
@@ -508,32 +479,33 @@ def uninstallPackage(package):
       requested if the package already exists.
 
     """
-    if _isUserPackage(package):  # delete 'manually' if in package dir
-        return (_uninstallUserPackage(package),
-                {"cmd": '', "stdout": '', "stderr": ''})
-    else:  # use the following if in the main package dir
-        # construct the pip command and execute as a subprocess
-        cmd = [sys.executable, "-m", "pip", "uninstall", package, "--yes",
-               '--no-input', '--no-color']
+    # if _isUserPackage(package):  # delete 'manually' if in package dir
+    #     return (_uninstallUserPackage(package),
+    #             {"cmd": '', "stdout": '', "stderr": ''})
+    # else:  # use the following if in the main package dir
+    
+    # construct the pip command and execute as a subprocess
+    cmd = [sys.executable, "-m", "pip", "uninstall", package, "--yes",
+            '--no-input', '--no-color']
 
-        # setup the environment to use the user's site-packages
-        env = os.environ.copy()
+    # setup the environment to use the user's site-packages
+    env = os.environ.copy()
 
-        # run command in subprocess
-        output = sp.Popen(
-            cmd,
-            stdout=sp.PIPE,
-            stderr=sp.PIPE,
-            shell=False,
-            env=env,
-            universal_newlines=True)
-        stdout, stderr = output.communicate()  # blocks until process exits
+    # run command in subprocess
+    output = sp.Popen(
+        cmd,
+        stdout=sp.PIPE,
+        stderr=sp.PIPE,
+        shell=False,
+        env=env,
+        universal_newlines=True)
+    stdout, stderr = output.communicate()  # blocks until process exits
 
-        sys.stdout.write(stdout)
-        sys.stderr.write(stderr)
+    sys.stdout.write(stdout)
+    sys.stderr.write(stderr)
 
-        # if any error, return code should be False
-        retcode = bool(stderr)
+    # if any error, return code should be False
+    retcode = bool(stderr)
 
     # Return the return code and a dict of information from the console
     return retcode, {"cmd": cmd, "stdout": stdout, "stderr": stderr}

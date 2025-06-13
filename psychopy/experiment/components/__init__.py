@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Extensible set of components for the PsychoPy Builder view.
@@ -25,7 +25,6 @@ excludeComponents = [
     'BaseComponent',
     'BaseVisualComponent',
     'BaseDeviceComponent',
-    'BaseStandaloneRoutine'  # templates only
 ]  # this one isn't ready yet
 
 # Plugin components are added dynamically at runtime, usually from plugin
@@ -288,14 +287,6 @@ def getInitVals(params, target="PsychoPy"):
                                        .format(inits[name]))
                     inits[name].valType = 'code'
 
-        if name == "deviceLabel":
-            if "name" in inits and not params[name]:
-                # if deviceName exists but is blank, use component name
-                inits[name].val = inits['name'].val
-            # make a code version of device name
-            inits['deviceLabelCode'] = copy.copy(inits[name])
-            inits['deviceLabelCode'].valType = "code"
-
         if not hasattr(inits[name], 'updates'):  # might be settings parameter instead
             continue
 
@@ -305,7 +296,7 @@ def getInitVals(params, target="PsychoPy"):
                 inits[name].val = None
                 inits[name].valType = 'extendedStr'
             else:
-                inits[name].val = 'None'
+                inits[name].val = None
                 inits[name].valType = 'code'
 
         # is constant so don't touch the parameter value

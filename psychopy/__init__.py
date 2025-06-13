@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 import os
@@ -87,6 +87,9 @@ if 'installing' not in locals():
                 env['_PIP_USE_IMPORTLIB_METADATA'] = 'True'
 
         # update environment, pass this to sub-processes (e.g. pip)
+        # make sure all environment variables are strings, sometimes these are
+        # pass as Path() objects
+        env = {k: str(v) for k, v in env.items()}
         os.environ.update(env)
 
         # make sure site knows about our custom user site-packages

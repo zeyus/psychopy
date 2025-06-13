@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 from pathlib import Path
 
-from psychopy.experiment.components import BaseDeviceComponent, Param, _translate, getInitVals
+from psychopy.alerts._alerts import alert
+from psychopy.experiment.components import BaseComponent, Param, _translate, getInitVals
 from psychopy.experiment import CodeGenerationException, valid_var_re
 from pkgutil import find_loader
 
@@ -15,14 +16,17 @@ from pkgutil import find_loader
 havePTB = find_loader('psychtoolbox') is not None
 
 
-class KeyboardComponent(BaseDeviceComponent):
+class KeyboardComponent(BaseComponent):
     """An event class for checking the keyboard at given timepoints"""
     # an attribute of the class, determines the section in components panel
     categories = ['Responses']
     targets = ['PsychoPy', 'PsychoJS']
     iconFile = Path(__file__).parent / 'keyboard.png'
     tooltip = _translate('Keyboard: check and record keypresses')
-    deviceClasses = ["psychopy.hardware.keyboard.KeyboardDevice"]
+    legacyParams = [
+        # as there's only ever 1 keyboard, it shouldn't interact with device manager
+        "deviceLabel"
+    ]
 
     def __init__(self, exp, parentName, name='key_resp', deviceLabel="",
                  allowedKeys="'y','n','left','right','space'", registerOn="press",
@@ -33,12 +37,11 @@ class KeyboardComponent(BaseDeviceComponent):
                  startEstim='', durationEstim='',
                  syncScreenRefresh=True,
                  disabled=False):
-        BaseDeviceComponent.__init__(
+        BaseComponent.__init__(
             self, exp, parentName, name,
             startType=startType, startVal=startVal,
             stopType=stopType, stopVal=stopVal,
             startEstim=startEstim, durationEstim=durationEstim,
-            deviceLabel=deviceLabel,
             disabled=disabled
         )
 
@@ -141,27 +144,13 @@ class KeyboardComponent(BaseDeviceComponent):
             updates='constant',
             hint=msg,
             label=_translate("Sync timing with screen"))
-
-    def writeDeviceCode(self, buff):
-        # get inits
-        inits = getInitVals(self.params)
-        # write device creation code
-        code = (
-            "if deviceManager.getDevice(%(deviceLabel)s) is None:\n"
-            "    # initialise %(deviceLabelCode)s\n"
-            "    %(deviceLabelCode)s = deviceManager.addDevice(\n"
-            "        deviceClass='keyboard',\n"
-            "        deviceName=%(deviceLabel)s,\n"
-            "    )\n"
-        )
-        buff.writeOnceIndentedLines(code % inits)
-
+    
     def writeInitCode(self, buff):
         # get inits
         inits = getInitVals(self.params)
         # make Keyboard object
         code = (
-            "%(name)s = keyboard.Keyboard(deviceName=%(deviceLabel)s)\n"
+            "%(name)s = keyboard.Keyboard(deviceName='defaultKeyboard')\n"
         )
         buff.writeIndentedLines(code % inits)
 
@@ -334,34 +323,7 @@ class KeyboardComponent(BaseDeviceComponent):
 
         buff.writeIndented("\n")
         buff.writeIndented("// *%s* updates\n" % self.params['name'])
-
-        allowedKeysIsVar = (valid_var_re.match(str(allowedKeys)) and not
-                            allowedKeys == 'None')
-
-        if allowedKeysIsVar:
-            # if it looks like a variable, check that the variable is suitable
-            # to eval at run-time
-            raise CodeGenerationException(
-                "Variables for allowKeys aren't supported for JS yet")
-            #code = ("# AllowedKeys looks like a variable named `%s`\n"
-            #        "if not '%s' in locals():\n"
-            #        "    logging.error('AllowedKeys variable `%s` is not defined.')\n"
-            #        "    core.quit()\n"
-            #        "if not type(%s) in [list, tuple, np.ndarray]:\n"
-            #        "    if not isinstance(%s, str):\n"
-            #        "        logging.error('AllowedKeys variable `%s` is "
-            #        "not string- or list-like.')\n"
-            #        "        core.quit()\n" %
-            #        allowedKeys)
-            #
-            #vals = (allowedKeys, allowedKeys, allowedKeys)
-            #code += (
-            #    "    elif not ',' in %s: %s = (%s,)\n" % vals +
-            #    "    else:  %s = eval(%s)\n" % (allowedKeys, allowedKeys))
-            #buff.writeIndentedLines(code)
-            #
-            #keyListStr = "keyList=list(%s)" % allowedKeys  # eval at run time
-
+        
         # write code to run on first frame once started
         indented = self.writeStartTestCodeJS(buff)
         if indented:
@@ -409,19 +371,14 @@ class KeyboardComponent(BaseDeviceComponent):
             # do we need a list of keys? (variable case is already handled)
             if allowedKeys in [None, "none", "None", "", "[]", "()"]:
                 keyListStr = "[]"
-            elif not allowedKeysIsVar:
-                try:
-                    keyList = eval(allowedKeys)
-                except Exception:
-                    raise CodeGenerationException(
-                        self.params["name"], "Allowed keys list is invalid.")
-                # this means the user typed "left","right" not ["left","right"]
-                if type(keyList) == tuple:
-                    keyList = list(keyList)
-                elif isinstance(keyList, str):  # a single string/key
-                    keyList = [keyList]
-                keyListStr = "%s" % repr(keyList)
-
+            else:
+                if isinstance(allowedKeys, str) and "," in allowedKeys:
+                    # it might be a list without [], if so split and recombine
+                    keyList = [item.strip() for item in allowedKeys.split(",")]
+                    keyListStr = f"[{','.join(keyList)}]"
+                else:
+                    # otherwise just use the value as is
+                    keyListStr = str(allowedKeys)
             # check for keypresses
             waitRelease = "false"
             if self.params['registerOn'] == "release":

@@ -6,6 +6,8 @@ import os
 import sys
 import platform
 from pathlib import Path
+from psychopy import logging
+from . import devices
 from .. import __version__
 
 from packaging.version import Version
@@ -22,14 +24,14 @@ except ImportError:
 
 
 if _haveConfigobj:  # Use the "global" installation.
-    from configobj import ConfigObj
+    from configobj import ConfigObj, ConfigObjError
     try:
         from configobj import validate
     except ImportError:  # Older versions of configobj
         import validate
 else:  # Use our contrib package if configobj is not installed or too old.
     from psychopy.contrib import configobj
-    from psychopy.contrib.configobj import ConfigObj
+    from psychopy.contrib.configobj import ConfigObj, ConfigObjError
     from psychopy.contrib.configobj import validate
 join = os.path.join
 
@@ -70,7 +72,7 @@ class Preferences:
         self.paths = {}  # this will remain a dictionary
         self.keys = {}  # does not remain a dictionary
 
-        self.getPaths()
+        # Only call loadAll, which will handle getPaths
         self.loadAll()
         # setting locale is now handled in psychopy.localization.init
         # as called upon import by the app
@@ -100,7 +102,7 @@ class Preferences:
             print(msg % userCfg)
         self.loadAll()  # reloads, now getting all from .spec
 
-    def getPaths(self):
+    def getPaths(self, userDir=None):
         """Get the paths to various directories and files used by PsychoPy.
 
         If the paths are not found, they are created. Usually, this is only
@@ -129,6 +131,7 @@ class Preferences:
         self.paths['resources'] = dirResources
         self.paths['assets'] = join(dirPsychoPy, "assets")
         self.paths['tests'] = join(dirPsychoPy, 'tests')
+        self.paths['scripts'] = join(dirPsychoPy, 'scripts')
         # path to libs/frameworks
         if 'PsychoPy.app/Contents' in exePath:
             self.paths['libs'] = exePath.replace("MacOS/python", "Frameworks")
@@ -138,16 +141,25 @@ class Preferences:
             # if there isn't an app folder at all then this is a lib-only psychopy
             # so don't try to load app prefs etc
             NO_APP = True
+        # get user dir
+        if userDir is not None and os.path.isdir(userDir):
+            self.paths['userPrefsDir'] = join(
+                userDir, '.psychopy3'
+            )
+        elif sys.platform == 'win32':
+            self.paths['userPrefsDir'] = join(
+                os.environ['APPDATA'], 'psychopy3'
+            )
+        else:
+            self.paths['userPrefsDir'] = join(
+                os.environ['HOME'], '.psychopy3'
+            )
+        # get system-appropriate spec file
         if sys.platform == 'win32':
             self.paths['prefsSpecFile'] = join(prefSpecDir, 'Windows.spec')
-            self.paths['userPrefsDir'] = join(os.environ['APPDATA'],
-                                              'psychopy3')
         else:
-            self.paths['prefsSpecFile'] = join(prefSpecDir,
-                                               platform.system() + '.spec')
-            self.paths['userPrefsDir'] = join(os.environ['HOME'],
-                                              '.psychopy3')
-
+            self.paths['prefsSpecFile'] = join(
+                prefSpecDir, platform.system() + '.spec')
         # directory for files created by the app at runtime needed for operation
         self.paths['userCacheDir'] = join(self.paths['userPrefsDir'], 'cache')
 
@@ -174,8 +186,11 @@ class Preferences:
             except OSError as err:
                 if err.errno != errno.EEXIST:
                     raise
-
-        # root site-packages directory for user-installed packages and add it
+        # make sure there's a device manager config file
+        deviceCfgFile = self.paths['deviceCfgFile'] = Path(self.paths['userPrefsDir']) / "devices.json"
+        if not deviceCfgFile.is_file():
+            deviceCfgFile.write_text("{}", encoding="utf-8")
+        # site-packages root directory for user-installed packages
         userPkgRoot = Path(self.paths['packages'])
 
         # Package paths for custom user site-packages, these should be compliant
@@ -188,6 +203,42 @@ class Preferences:
         elif sys.platform == 'darwin' and sys._framework:  # macos + framework
             pyVersion = sys.version_info
             pyDirName = "python{}.{}".format(pyVersion[0], pyVersion[1])
+
+            # determine if we should use symlinks for the package folders if the
+            # user already has package installed
+            useSymlinks = (
+                Path(self.paths['packages']) / 'include' / pyDirName).exists()
+
+            # Standard scheme of lib directories for OSX framework does not
+            # distinguish between python versions. We must modify the
+            # site-packages root directory to provide a unique path for
+            # each python version.
+            userPkgRoot = Path(self.paths['packages']) / pyDirName
+            try:
+                os.makedirs(userPkgRoot)
+            except OSError as err:
+                if err.errno != errno.EEXIST:
+                    raise
+            
+            if useSymlinks:
+                # create symlinks to refer to the old package directories
+                oldUserPackageRoot = Path(self.paths['packages'])
+                userPackages = userPkgRoot / "lib"
+                userInclude = userPkgRoot / "include"
+                userScripts = userPkgRoot / "bin"
+
+                # create symlinks to the python version agnostic directories
+                if not userPackages.exists():
+                    userPackages.symlink_to(oldUserPackageRoot / "lib")
+                if not userInclude.exists():
+                    userInclude.symlink_to(oldUserPackageRoot / "include")
+                if not userScripts.exists():
+                    userScripts.symlink_to(oldUserPackageRoot / "bin")
+
+            # reload userPkgRoot
+            self.paths['packages'] = userPkgRoot = Path(self.paths['packages'])  
+            # See the ox_framework_user scheme standard:
+            # https://docs.python.org/3/library/sysconfig.html#osx-framework-user
             userPackages = userPkgRoot / "lib" / "python" / "site-packages"
             userInclude = userPkgRoot / "include" / pyDirName
             userScripts = userPkgRoot / "bin"
@@ -231,9 +282,10 @@ class Preferences:
                     Path(self.paths['themes']) / file.name
                 )
 
-    def loadAll(self):
+    def loadAll(self, userDir=None):
         """Load the user prefs and the application data
         """
+        self.getPaths(userDir=userDir)
         self._validator = validate.Validator()
 
         # note: self.paths['userPrefsDir'] gets set in loadSitePrefs()
@@ -283,12 +335,35 @@ class Preferences:
                 msg = ("Preferences.py failed to create folder %s. Settings"
                        " will be read-only")
                 print(msg % self.paths['userPrefsDir'])
-        # then get the configuration file
-        cfg = ConfigObj(self.paths['userPrefsFile'],
-                        encoding='UTF8', configspec=self.prefsSpec)
-        # cfg.validate(self._validator, copy=False)  # merge then validate
-        # don't cfg.write(), see explanation above
+        # load configuration from file
+        try:
+            cfg = ConfigObj(
+                self.paths['userPrefsFile'], encoding='UTF8', configspec=self.prefsSpec
+            )
+        except ConfigObjError as err:
+            # if invalid, print a warning and reset to defaults
+            logging.warn(
+                f"Failed to load preferences file, falling back to defaults. Reason:\n{err}"
+            )
+            # create blank config
+            cfg = ConfigObj(
+                None, encoding='UTF8', configspec=self.prefsSpec
+            )
+            # point blank config object to file
+            cfg.filename = self.paths['userPrefsFile']
+            # overwrite existing prefs
+            cfg.write()
+        
         return cfg
+    
+    @property
+    def devices(self):
+        if not hasattr(self, "_devices"):
+            self._devices = devices.DeviceConfig(
+            self.paths['deviceCfgFile']
+        )
+        
+        return self._devices
 
     def saveUserPrefs(self):
         """Validate and save the various setting to the appropriate files
@@ -305,11 +380,29 @@ class Preferences:
         appDir = Path(self.paths['appDir'])
         if not appDir.is_dir():  # if no app dir this may be just lib install
             return {}
-        # fetch appData too against a config spec
-        appDataSpec = ConfigObj(join(self.paths['appDir'], 'appData.spec'),
-                                encoding='UTF8', list_values=False)
-        cfg = ConfigObj(self.paths['appDataFile'],
-                        encoding='UTF8', configspec=appDataSpec)
+        # get spec to validate configuration against
+        appDataSpec = ConfigObj(
+            join(self.paths['appDir'], 'appData.spec'), encoding='UTF8', list_values=False
+        )
+        # get configuration from file
+        try:
+            cfg = ConfigObj(
+                self.paths['appDataFile'], encoding='UTF8', configspec=appDataSpec
+            )
+        except ConfigObjError as err:
+            # if invalid, print a warning and reset to defaults
+            logging.warn(
+                f"Failed to load preferences file, falling back to defaults. Reason:\n{err}"
+            )
+            # create blank config
+            cfg = ConfigObj(
+                None, encoding='UTF8', configspec=appDataSpec
+            )
+            # point blank config object to file
+            cfg.filename = self.paths['appDataFile']
+            # overwrite existing prefs
+            cfg.write()
+        # validate configuration
         resultOfValidate = cfg.validate(self._validator,
                                         copy=True,
                                         preserve_errors=True)

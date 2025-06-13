@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Base class for serial devices. Includes some convenience methods to open
@@ -14,6 +14,9 @@ import time
 
 from psychopy import logging
 import serial
+
+from psychopy.localization import _translate
+from .exceptions import DeviceNotConnectedError
 from psychopy.tools import systemtools as st
 from psychopy.tools.attributetools import AttributeGetSetMixin
 from .base import BaseDevice
@@ -175,9 +178,12 @@ class SerialDevice(BaseDevice, AttributeGetSetMixin):
             global ports
             ports[port] = self
         else:
-            raise ConnectionError(
-                f"Failed to connect to device on {port}, this device is likely to have "
-                f"been disconnected, or the port is in use by another application."
+            raise DeviceNotConnectedError(
+                _translate(
+                    "Failed to connect to device on {port}, this device is likely to have "
+                    "been disconnected, or the port is in use by another application."
+                ).format(port=port), 
+                deviceClass=SerialDevice
             )
         # we aren't in a time-critical period so flush messages
         logging.flush()

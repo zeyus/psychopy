@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Dialog classes for the Builder Code component
@@ -488,7 +488,7 @@ class CodeBox(BaseCodeEditor, handlers.ThemeMixin):
         BaseCodeEditor.__init__(self, parent, ID, pos, size, style)
 
         self.parent = parent
-        self.app = parent.app
+        # self.app = parent.app
         self.prefs = prefs.coder
         self.appData = prefs.appData
         self.paths = prefs.paths

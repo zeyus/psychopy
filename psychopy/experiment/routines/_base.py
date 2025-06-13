@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Describes the Flow of an experiment
@@ -16,6 +16,7 @@ from pathlib import Path
 
 from psychopy.experiment.components.static import StaticComponent
 from psychopy.experiment.components.routineSettings import RoutineSettingsComponent
+from psychopy.experiment.devices import DeviceMixin
 from psychopy.localization import _translate
 from psychopy.experiment import Param
 
@@ -30,6 +31,11 @@ class BaseStandaloneRoutine:
     version = "0.0.0"
     # is it still in beta?
     beta = False
+    # hide this Component in Builder view?
+    hidden = False
+    # are there any known legacy params for this Routine?
+    # these will be removed & warnings ignored on experiment load
+    legacyParams = []
 
     def __init__(self, exp, name='',
                  stopType='duration (s)', stopVal='',
@@ -45,7 +51,7 @@ class BaseStandaloneRoutine:
         msg = _translate(
             "Name of this Routine (alphanumeric or _, no spaces)")
         self.params['name'] = Param(name,
-                                    valType='code', inputType="single", categ='Basic',
+                                    valType='code', inputType="name", categ='Basic',
                                     hint=msg,
                                     label=_translate('Name'))
 
@@ -372,14 +378,41 @@ class BaseStandaloneRoutine:
         self.params['disabled'].val = value
 
 
-class BaseValidatorRoutine(BaseStandaloneRoutine):
+class BaseDeviceRoutine(BaseStandaloneRoutine, DeviceMixin):
+    """
+    Base class for most routines which interface with a hardware device.
+    """
+    def __init__(
+            self, exp,
+            # basic
+            name='',
+            stopType='duration (s)', stopVal='',
+            # device
+            deviceLabel="",
+            # testing
+            disabled=False
+    ):
+        # initialise base component
+        BaseStandaloneRoutine.__init__(
+            self, exp, 
+            # basic
+            name=name,
+            stopType=stopType, stopVal=stopVal,
+            # testing
+            disabled=disabled
+        )
+        # add device stuff
+        self.addDeviceParams(
+            defaultLabel=deviceLabel
+        )
+
+
+class BaseValidatorRoutine(BaseDeviceRoutine):
     """
     Subcategory of Standalone Routine, which sets up a "validator" - an object which is linked to in the Testing tab
     of another Component and validates that the component behaved as expected. Any validator Routines should subclass
     this rather than BaseStandaloneRoutine.
     """
-    # list of class strings (readable by DeviceManager) which this component's device could be
-    deviceClasses = []
 
     def writeRoutineStartValidationCode(self, buff, stim):
         """
@@ -665,19 +698,23 @@ class Routine(list):
         )
         buff.writeIndentedLines(code % self.params)
 
-        code = ("for thisComponent in {name}.components:\n"
-                "    thisComponent.tStart = None\n"
-                "    thisComponent.tStop = None\n"
-                "    thisComponent.tStartRefresh = None\n"
-                "    thisComponent.tStopRefresh = None\n"
-                "    if hasattr(thisComponent, 'status'):\n"
-                "        thisComponent.status = NOT_STARTED\n"
-                "# reset timers\n"
-                't = 0\n'
-                '_timeToFirstFrame = win.getFutureFlipTime(clock="now")\n'
-                # '{clockName}.reset(-_timeToFirstFrame)  # t0 is time of first possible flip\n'
-                'frameN = -1\n'
-                '\n# --- Run Routine "{name}" ---\n')
+        code = (
+            "for thisComponent in {name}.components:\n"
+            "    thisComponent.tStart = None\n"
+            "    thisComponent.tStop = None\n"
+            "    thisComponent.tStartRefresh = None\n"
+            "    thisComponent.tStopRefresh = None\n"
+            "    if hasattr(thisComponent, 'status'):\n"
+            "        thisComponent.status = NOT_STARTED\n"
+            "# reset timers\n"
+            't = 0\n'
+            '_timeToFirstFrame = win.getFutureFlipTime(clock="now")\n'
+            # '{clockName}.reset(-_timeToFirstFrame)  # t0 is time of first possible flip\n'
+            'frameN = -1\n'
+            '\n'
+            '# --- Run Routine "{name}" ---\n'
+            'thisExp.currentRoutine = {name}\n'
+        )
         buff.writeIndentedLines(code.format(name=self.name,
                                             clockName=self._clockName))
 
@@ -719,8 +756,8 @@ class Routine(list):
         for event in self:
             if event.type == 'Static':
                 continue  # we'll do those later
-            event.writeFrameCode(buff)
             event.writeEachFrameValidationCode(buff)
+            event.writeFrameCode(buff)
         # update static component code last
         for event in self.getStatics():
             event.writeFrameCode(buff)
@@ -740,13 +777,7 @@ class Routine(list):
             "    return\n"
         )
         buff.writeIndentedLines(code)
-
-        # handle pausing
-        playbackComponents = [
-            comp.name for comp in self
-            if type(comp).__name__ in ("MovieComponent", "SoundComponent")
-        ]
-        playbackComponentsStr = ", ".join(playbackComponents)
+        # write code (work out playback and dispatch comps at runtime)
         code = (
             "# pause experiment here if requested\n"
             "if thisExp.status == PAUSED:\n"
@@ -754,27 +785,26 @@ class Routine(list):
             "        thisExp=thisExp, \n"
             "        win=win, \n"
             "        timers=[routineTimer, globalClock], \n"
-            "        playbackComponents=[{playbackComponentsStr}]\n"
+            "        currentRoutine=%(name)s,\n"
             "    )\n"
             "    # skip the frame we paused on\n"
             "    continue"
         )
-        code = code.format(playbackComponentsStr=playbackComponentsStr)
-        buff.writeIndentedLines(code)
+        buff.writeIndentedLines(code % self.params)
 
         # are we done yet?
         code = (
             '\n'
-            '# check if all components have finished\n'
-            'if not continueRoutine:  # a component has requested a '
-            'forced-end of Routine\n'
+            '# has a Component requested the Routine to end?\n'
+            'if not continueRoutine:\n'
             '    %(name)s.forceEnded = routineForceEnded = True\n'
+            '# has the Routine been forcibly ended?\n'
+            'if %(name)s.forceEnded or routineForceEnded:\n'
             '    break\n'
-            'continueRoutine = False  # will revert to True if at least '
-            'one component still running\n'
+            '# has every Component finished?\n'
+            'continueRoutine = False\n'
             'for thisComponent in %(name)s.components:\n'
-            '    if hasattr(thisComponent, "status") and '
-            'thisComponent.status != FINISHED:\n'
+            '    if hasattr(thisComponent, "status") and thisComponent.status != FINISHED:\n'
             '        continueRoutine = True\n'
             '        break  # at least one component has not yet finished\n')
         buff.writeIndentedLines(code % self.params)
@@ -825,6 +855,8 @@ class Routine(list):
                 "t = 0;\n"
                 "frameN = -1;\n"
                 "continueRoutine = true; // until we're told otherwise\n"
+                "// keep track of whether this Routine was forcibly ended\n"
+                "routineForceEnded = false;\n"
                 % self.params)
         buff.writeIndentedLines(code)
         # can we use non-slip timing?
@@ -925,6 +957,7 @@ class Routine(list):
         code = ("// check if the Routine should terminate\n"
                 "if (!continueRoutine) {"
                 "  // a component has requested a forced-end of Routine\n"
+                "  routineForceEnded = true;\n"
                 "  return Scheduler.Event.NEXT;\n"
                 "}\n\n"
                 "continueRoutine = false;  "
@@ -1015,7 +1048,9 @@ class Routine(list):
         # reset routineTimer at the *very end* of all non-nonSlip routines
         if useNonSlip:
             code = (
-                "if (%(name)sMaxDurationReached) {{\n"
+                "if (routineForceEnded) {{\n"
+                "    routineTimer.reset();"
+                "}} else if (%(name)sMaxDurationReached) {{\n"
                 "    %(name)sClock.add(%(name)sMaxDuration);\n"
                 "}} else {{\n"
                 "    %(name)sClock.add({:f});\n"

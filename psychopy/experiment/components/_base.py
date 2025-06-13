@@ -3,7 +3,7 @@
 
 """
 Part of the PsychoPy library
-Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 Distributed under the terms of the GNU General Public License (GPL).
 """
 import copy
@@ -13,6 +13,7 @@ from xml.etree.ElementTree import Element
 
 from psychopy import prefs
 from psychopy.constants import FOREVER
+from psychopy.experiment.devices import DeviceMixin
 from ..params import Param
 from psychopy.experiment.utils import canBeNumeric
 from psychopy.experiment.utils import CodeGenerationException
@@ -40,6 +41,11 @@ class BaseComponent:
     beta = False
     # what classes can validate this Component? Specify by name
     validatorClasses = []
+    # hide this Component in Builder view?
+    hidden = False
+    # are there any known legacy params for this Component?
+    # these will be removed & warnings ignored on experiment load
+    legacyParams = []
 
     def __init__(self, exp, parentName, name='',
                  startType='time (s)', startVal='',
@@ -65,7 +71,7 @@ class BaseComponent:
         msg = _translate(
             "Name of this Component (alphanumeric or _, no spaces)")
         self.params['name'] = Param(name,
-            valType='code', inputType="single", categ='Basic',
+            valType='code', inputType="name", categ='Basic',
             hint=msg,
             label=_translate("Name"))
 
@@ -499,6 +505,14 @@ class BaseComponent:
         buff.writeIndentedLines(code % params)
         buff.setIndentLevel(+1, relative=True)
 
+        if self.checkNeedToUpdate('set every frame'):
+            # write param updates for first frame (if needed)
+            code = (
+                "// update params\n"
+            )
+            buff.writeIndentedLines(code % params)
+            self.writeParamUpdatesJS(buff, 'set every frame')
+
         code = (f"// keep track of start time/frame for later\n"
                 f"{params['name']}.tStart = t;  // (not accounting for frame time here)\n"
                 f"{params['name']}.frameNStart = frameN;  // exact frame index\n\n")
@@ -621,7 +635,7 @@ class BaseComponent:
         if validator:
             # queue validation
             code = (
-                "# tell attached validator (%(name)s) to start looking for a start flag\n"
+                "# tell attached validator (%(name)s) to start looking for a stop flag\n"
                 "%(name)s.status = STARTED\n"
             )
             buff.writeIndentedLines(code % validator.params)
@@ -824,7 +838,7 @@ class BaseComponent:
         # construct if statement
         code = (
             "// if %(name)s is active this frame...\n"
-            "if (%(name)s.status == STARTED"
+            "if (%(name)s.status === PsychoJS.Status.STARTED"
         )
         # add any other conditions and finish the statement
         if extra and not extra.startswith(" "):
@@ -840,7 +854,7 @@ class BaseComponent:
                 "// update params\n"
             )
             buff.writeIndentedLines(code % params)
-            self.writeParamUpdates(buff, 'set every frame')
+            self.writeParamUpdatesJS(buff, 'set every frame')
 
         return buff.indentLevel - startIndent
 
@@ -1363,12 +1377,10 @@ class BaseComponent:
             return "thisExp"
 
 
-class BaseDeviceComponent(BaseComponent):
+class BaseDeviceComponent(BaseComponent, DeviceMixin):
     """
     Base class for most components which interface with a hardware device.
     """
-    # list of class strings (readable by DeviceManager) which this component's device could be
-    deviceClasses = []
 
     def __init__(
             self, exp, parentName,
@@ -1394,22 +1406,9 @@ class BaseDeviceComponent(BaseComponent):
             saveStartStop=saveStartStop, syncScreenRefresh=syncScreenRefresh,
             disabled=disabled
         )
-        # require hardware
-        self.exp.requirePsychopyLibs(
-            ['hardware']
-        )
-        # --- Device params ---
-        self.order += [
-            "deviceLabel"
-        ]
-        # label to refer to device by
-        self.params['deviceLabel'] = Param(
-            deviceLabel, valType="str", inputType="single", categ="Device",
-            label=_translate("Device label"),
-            hint=_translate(
-                "A label to refer to this Component's associated hardware device by. If using the "
-                "same device for multiple components, be sure to use the same label here."
-            )
+        # add device stuff
+        self.addDeviceParams(
+            defaultLabel=deviceLabel
         )
 
 
@@ -1421,7 +1420,7 @@ class BaseVisualComponent(BaseComponent):
     targets = []
     iconFile = Path(__file__).parent / "unknown" / "unknown.png"
     tooltip = ""
-    validatorClasses = ["PhotodiodeValidatorRoutine"]
+    validatorClasses = ["VisualValidatorRoutine"]
 
     def __init__(self, exp, parentName, name='',
                  units='from exp settings', color='white', fillColor="", borderColor="",
@@ -1614,16 +1613,6 @@ class BaseVisualComponent(BaseComponent):
             buff.writeIndented(f"// *{params['name']}* not supported by PsychoJS\n")
             return
 
-        # set parameters that need updating every frame
-        # do any params need updating? (this method inherited from _base)
-        if self.checkNeedToUpdate('set every frame'):
-            buff.writeIndentedLines(f"\nif ({params['name']}.status === PsychoJS.Status.STARTED){{ "
-                                    f"// only update if being drawn\n")
-            buff.setIndentLevel(+1, relative=True)  # to enter the if block
-            self.writeParamUpdatesJS(buff, 'set every frame')
-            buff.setIndentLevel(-1, relative=True)  # to exit the if block
-            buff.writeIndented("}\n")
-
         buff.writeIndentedLines(f"\n// *{params['name']}* updates\n")
         # writes an if statement to determine whether to draw etc
         indented = self.writeStartTestCodeJS(buff)
@@ -1637,7 +1626,18 @@ class BaseVisualComponent(BaseComponent):
                     "\n"
                 )
                 indented -= 1
-        # writes an if statement to determine whether to draw etc
+        # writes an if statement to determine whether we've started
+        indented = self.writeActiveTestCodeJS(buff)
+        if indented:
+            # to get out of the if statement
+            while indented > 0:
+                buff.setIndentLevel(-1, relative=True)
+                buff.writeIndentedLines(
+                    "}\n"
+                    "\n"
+                )
+                indented -= 1
+        # writes an if statement to determine whether to stop
         indented = self.writeStopTestCodeJS(buff)
         if indented:
             buff.writeIndentedLines(f"{params['name']}.setAutoDraw(false);\n")

@@ -12,6 +12,25 @@ class ButtonResponse(base.BaseResponse):
         base.BaseResponse.__init__(self, t=t, value=value)
         # store channel
         self.channel = channel
+    
+    def __eq__(self, other):
+        """
+        ButtonResponse will recognise itself as equal to either:
+        - A boolean which matches its value
+        - An integer which matches its channel
+        - Another ButtonResponse which matches its value and channel
+        """
+        # match another ButtonResponse with the same value and channel
+        if isinstance(other, ButtonResponse):
+            return other.value == self.value and other.channel == self.channel
+        # match a boolean to response
+        if isinstance(other, bool):
+            return other == self.value
+        # match an integer to channel
+        if isinstance(other, int):
+            return other == self.channel
+        
+        return False
 
 
 class BaseButtonGroup(base.BaseResponseDevice):
@@ -169,6 +188,9 @@ class ButtonBox:
     Builder-friendly wrapper around BaseButtonGroup.
     """
     def __init__(self, device):
+        # start off with None for device
+        self.device = None
+
         if isinstance(device, BaseButtonGroup):
             # if given a button group, use it
             self.device = device
@@ -179,10 +201,13 @@ class ButtonBox:
             else:
                 # don't use formatted string literals in _translate()
                 raise ValueError(_translate(
-                    "Could not find device named '{device}', make sure it has been set up "
+                    "Could not find device named '{}', make sure it has been set up "
                     "in DeviceManager."
                 ).format(device))
-
+        # if given None, use first button group we find in DeviceManager
+        for name, device in DeviceManager.getInitialisedDevices(BaseButtonGroup).items():
+            self.device = device
+            break
         # starting value for status (Builder)
         self.status = constants.NOT_STARTED
         # arrays to store info (Builder)

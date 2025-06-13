@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 # Author: Jeremy R. Gray, 2012
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from psychopy import logging
 from psychopy.alerts import alert
+from psychopy.experiment.devices import DeviceBackend
 from psychopy.tools import stringtools as st, systemtools as syst, audiotools as at
 from psychopy.experiment.components import (
     BaseComponent, BaseDeviceComponent, Param, getInitVals, _translate
@@ -24,7 +25,6 @@ class MicrophoneComponent(BaseDeviceComponent):
     iconFile = Path(__file__).parent / 'microphone.png'
     tooltip = _translate('Microphone: basic sound capture (fixed onset & '
                          'duration), okay for spoken words')
-    deviceClasses = ['psychopy.hardware.microphone.MicrophoneDevice']
 
     # dict of available transcribers (plugins can add entries to this)
     localTranscribers = {
@@ -38,20 +38,25 @@ class MicrophoneComponent(BaseDeviceComponent):
         'google': "psychopy.sound.transcribe:GoogleCloudTranscriber"
     }
 
-    def __init__(self, exp, parentName, name='mic',
-                 startType='time (s)', startVal=0.0,
-                 stopType='duration (s)', stopVal=2.0,
-                 startEstim='', durationEstim='',
-                 channels='auto', device=None,
-                 sampleRate='DVD Audio (48kHz)', maxSize=24000,
-                 outputType='default', speakTimes=False, trimSilent=False,
-                 policyWhenFull='warn',
-                 transcribe=False, transcribeBackend="none",
-                 transcribeLang="en-US", transcribeWords="",
-                 transcribeWhisperModel="base",
-                 transcribeWhisperDevice="auto",
-                 #legacy
-                 stereo=None, channel=None):
+    def __init__(
+        self, exp, parentName, name='mic',
+        startType='time (s)', startVal=0.0,
+        stopType='duration (s)', stopVal=2.0,
+        startEstim='', durationEstim='',
+        device=None,
+        exclusive=False,
+        outputType='default', speakTimes=False, trimSilent=False,
+        policyWhenFull='warn',
+        transcribe=False, transcribeBackend="none",
+        transcribeLang="en-US", transcribeWords="",
+        transcribeWhisperModel="base",
+        transcribeWhisperDevice="auto",
+        #legacy
+        sampleRate=48000, 
+        channels=2,
+        stereo=None, 
+        channel=None
+    ):
         super(MicrophoneComponent, self).__init__(
             exp, parentName, name=name,
             startType=startType, startVal=startVal,
@@ -68,83 +73,6 @@ class MicrophoneComponent(BaseDeviceComponent):
         msg = _translate(
             'The duration of the recording in seconds; blank = 0 sec')
         self.params['stopType'].hint = msg
-
-        # --- Device params ---
-        self.order += [
-            "device",
-            "channels",
-            "sampleRate",
-            "maxSize",
-        ]
-
-        def getDeviceIndices():
-            from psychopy.hardware.microphone import MicrophoneDevice
-            profiles = MicrophoneDevice.getAvailableDevices()
-
-            return [None] + [profile['index'] for profile in profiles]
-
-        def getDeviceNames():
-            from psychopy.hardware.microphone import MicrophoneDevice
-            profiles = MicrophoneDevice.getAvailableDevices()
-
-            return ["default"] + [profile['deviceName'] for profile in profiles]
-
-        self.params['device'] = Param(
-            device, valType='code', inputType="choice", categ="Device",
-            allowedVals=getDeviceIndices,
-            allowedLabels=getDeviceNames,
-            label=_translate("Device"),
-            hint=_translate(
-                "What microphone device would you like the use to record? This will only affect "
-                "local experiments - online experiments ask the participant which mic to use."
-            )
-        )
-        # grey out device settings when device is default
-        for depParam in ("channels", "sampleRate"):
-            self.depends.append({
-                "dependsOn": "device",  # if...
-                "condition": "== 'None'",  # is...
-                "param": depParam,  # then...
-                "true": "hide",  # should...
-                "false": "show",  # otherwise...
-            })
-        if stereo is not None:
-            # If using a legacy mic component, work out channels from old bool value of stereo
-            channels = ['mono', 'stereo'][stereo]
-        self.params['channels'] = Param(
-            channels, valType='str', inputType="choice", categ='Device',
-            allowedVals=['auto', 'mono', 'stereo'],
-            allowedLabels=[_translate("Auto"), _translate("Mono"), _translate("Stereo")],
-            label=_translate("Channels"),
-            hint=_translate(
-                "Record two channels (stereo) or one (mono, smaller file). Select 'auto' to use as "
-                "many channels as the selected device allows."
-            )
-        )
-
-        def getSampleRates():
-            return [r[0] for r in at.sampleRateQualityLevels.values()]
-        def getSampleRateLabels():
-            return [r[1] for r in at.sampleRateQualityLevels.values()]
-        self.params['sampleRate'] = Param(
-            sampleRate, valType='num', inputType="choice", categ='Device',
-            allowedVals=getSampleRates,
-            allowedLabels=getSampleRateLabels,
-            label=_translate("Sample rate (hz)"),
-            hint=_translate(
-                "How many samples per second (Hz) to record at"
-            ),
-            direct=False
-        )
-        self.params['maxSize'] = Param(
-            maxSize, valType='num', inputType="single", categ='Device',
-            updates="set every repeat",
-            label=_translate("Max recording size (kb)"),
-            hint=_translate(
-                "To avoid excessively large output files, what is the biggest file size you are "
-                "likely to expect?"
-            )
-        )
 
         # --- Data params ---
         msg = _translate(
@@ -234,7 +162,7 @@ class MicrophoneComponent(BaseDeviceComponent):
         )
         self.depends.append({
             "dependsOn": "transcribeBackend",
-            "condition": "=='Google'",
+            "condition": "=='google'",
             "param": "transcribeLang",
             "true": "show",  # what to do with param if condition is True
             "false": "hide",  # permitted: hide, show, enable, disable
@@ -249,7 +177,7 @@ class MicrophoneComponent(BaseDeviceComponent):
         )
         self.depends.append({
             "dependsOn": "transcribeBackend",
-            "condition": "=='Google'",
+            "condition": "=='google'",
             "param": "transcribeWords",
             "true": "show",  # what to do with param if condition is True
             "false": "hide",  # permitted: hide, show, enable, disable
@@ -301,42 +229,6 @@ class MicrophoneComponent(BaseDeviceComponent):
         MicrophoneComponent.onlineTranscribers)
         """
         return {'None': "none", **self.localTranscribers, **self.onlineTranscribers}
-
-    def writeDeviceCode(self, buff):
-        """
-        Code to setup the CameraDevice for this component.
-
-        Parameters
-        ----------
-        buff : io.StringIO
-            Text buffer to write code to.
-        """
-        inits = getInitVals(self.params)
-
-        # --- setup mic ---
-        # make sure sample rate is numeric
-        if inits['sampleRate'].val in at.sampleRateLabels:
-            inits['sampleRate'].val = at.sampleRateLabels[inits['sampleRate'].val]
-        # Substitute channel value for numeric equivalent
-        inits['channels'] = {'mono': 1, 'stereo': 2, 'auto': None}[self.params['channels'].val]
-        # initialise mic device
-        code = (
-            "# initialise microphone\n"
-            "deviceManager.addDevice(\n"
-            "    deviceClass='psychopy.hardware.microphone.MicrophoneDevice',\n"
-            "    deviceName=%(deviceLabel)s,\n"
-            "    index=%(device)s,\n"
-            "    maxRecordingSize=%(maxSize)s,\n"
-        )
-        if self.params['device'].val not in ("None", "", None):
-            code += (
-            "    channels=%(channels)s, \n"
-            "    sampleRateHz=%(sampleRate)s, \n"
-            )
-        code += (
-            ")\n"
-        )
-        buff.writeOnceIndentedLines(code % inits)
 
     def writeStartCode(self, buff):
         inits = getInitVals(self.params)
@@ -409,11 +301,8 @@ class MicrophoneComponent(BaseDeviceComponent):
 
     def writeInitCodeJS(self, buff):
         inits = getInitVals(self.params)
-        # make sure sample rate is numeric
-        if inits['sampleRate'].val in at.sampleRateLabels:
-            inits['sampleRate'].val = at.sampleRateLabels[inits['sampleRate'].val]
         # Alert user if non-default value is selected for device
-        if inits['device'].val != 'default':
+        if inits['deviceLabel'].val not in (None, "", 'None'):
             alert(5055, strFields={'name': inits['name'].val})
         # Write code
         code = (
@@ -424,9 +313,6 @@ class MicrophoneComponent(BaseDeviceComponent):
         code = (
                 "win : psychoJS.window, \n"
                 "name:'%(name)s',\n"
-                "sampleRateHz : %(sampleRate)s,\n"
-                "channels : %(channels)s,\n"
-                "maxRecordingSize : %(maxSize)s,\n"
                 "loopback : true,\n"
                 "policyWhenFull : 'ignore',\n"
         )
@@ -658,42 +544,49 @@ class MicrophoneComponent(BaseDeviceComponent):
         buff.writeIndentedLines(code % inits)
 
 
-def getDeviceName(index):
-    """
-    Get device name from a given index
+class MicrophoneDeviceBackend(DeviceBackend):
+    # name of this backend to display in Device Manager
+    backendLabel = "Microphone"
+    # class of the device which this backend corresponds to
+    deviceClass = "psychopy.hardware.microphone.MicrophoneDevice"
+    # icon to show in device manager
+    icon = "light/microphone.png"
 
-    Parameters
-    ----------
-    index : int or None
-        Index of the device to use
-    """
-    name = "defaultMicrophone"
-    if isinstance(index, str) and index.isnumeric():
-        index = int(index)
-    for dev in syst.getAudioCaptureDevices():
-        if dev['index'] == index:
-            name = dev['name']
+    def __init__(self, profile):
+        # init parent class
+        DeviceBackend.__init__(self, profile)
 
-    return name
+        # add params
+        self.order += [
+            "exclusive",
+        ]
+        self.params['exclusive'] = Param(
+            False, valType="code", inputType="bool",
+            label=_translate("Exclusive control"),
+            hint=_translate(
+                "Take exclusive control of the microphone, so other apps can't use it during your "
+                "experiment."
+            )
+        )
+    
+    def writeDeviceCode(self, buff):
+        """
+        Code to setup a device with this backend.
+
+        Parameters
+        ----------
+        buff : io.StringIO
+            Text buffer to write code to.
+        """
+        # write basic code
+        self.writeBaseDeviceCode(buff, close=False)
+        # add exclusive param and close
+        code = (
+            "    exclusive=%(exclusive)s,\n"
+            ")\n"
+        )
+        buff.writeIndentedLines(code % self.params)
 
 
-def getDeviceVarName(index, case="camel"):
-    """
-    Get device name from a given index and convert it to a valid variable name.
-
-    Parameters
-    ----------
-    index : int or None
-        Index of the device to use
-    case : str
-        Format of the variable name (see stringtools.makeValidVarName for info on accepted formats)
-    """
-    # Get device name
-    name = getDeviceName(index)
-    # If device name is just default, add "microphone" for clarity
-    if name == "default":
-        name += "_microphone"
-    # Make valid
-    varName = st.makeValidVarName(name, case=case)
-
-    return varName
+# register backend with Component
+MicrophoneComponent.registerBackend(MicrophoneDeviceBackend)

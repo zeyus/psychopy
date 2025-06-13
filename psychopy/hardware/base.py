@@ -5,7 +5,7 @@
 """
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = [
@@ -282,6 +282,12 @@ class BaseResponseDevice(BaseDevice):
             'args': args,
             'kwargs': kwargs
         })
+    
+    def clearCallbacks(self):
+        """
+        Un-register all callbacks which have been registered to this device by `registerCallback`
+        """
+        self.callbacks = []
     
     def checkCallbacks(self, message):
         """

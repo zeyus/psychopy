@@ -11,6 +11,7 @@ import importlib
 import numpy as np
 from psychopy import logging
 from psychopy.tools.attributetools import attributeSetter
+from pathlib import Path
 
 
 formStyles = {
@@ -20,7 +21,7 @@ formStyles = {
         'itemColor': 'black',
         'responseColor': 'black',
         'markerColor': [0.89, -0.35, -0.28],
-        'font': "Open Sans",
+        'font': "Noto Sans",
     },
     'dark': {
         'fillColor': [-0.19, -0.19, -0.14],
@@ -28,7 +29,7 @@ formStyles = {
         'itemColor': 'white',
         'responseColor': 'white',
         'markerColor': [0.89, -0.35, -0.28],
-        'font': "Open Sans",
+        'font': "Noto Sans",
     },
 }
 
@@ -75,6 +76,17 @@ def serialize(obj, includeClass=True):
         obj = float(obj)
     elif isinstance(obj, np.ndarray):
         obj = obj.tolist()
+    # convert possible file paths into Path
+    try:
+        pathVal = Path(obj)
+    except:
+        pass
+    else:
+        if pathVal.is_file() or pathVal.is_dir():
+            obj = pathVal
+    # make any Path absolute so it's not dependent on cwd
+    if isinstance(obj, Path):
+        obj = str(obj.absolute())
     # if an array, serialize items
     if isinstance(obj, (list, tuple)):
         return [serialize(val) for val in obj]

@@ -5,7 +5,7 @@
 """
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = ['Microphone']
@@ -26,11 +26,13 @@ class Microphone:
             streamBufferSecs=2.0,
             maxRecordingSize=24000,
             policyWhenFull='warn',
-            audioLatencyMode=None,
+            exclusive=False,
             audioRunMode=0,
             name="mic",
             recordingFolder=Path.home(),
             recordingExt="wav",
+            # legacy
+            audioLatencyMode=None,
     ):
         # store name
         self.name = name
@@ -55,7 +57,7 @@ class Microphone:
                 streamBufferSecs=streamBufferSecs,
                 maxRecordingSize=maxRecordingSize,
                 policyWhenFull=policyWhenFull,
-                audioLatencyMode=audioLatencyMode,
+                exclusive=exclusive,
                 audioRunMode=audioRunMode
             )
         # set policy when full (in case device already existed)
@@ -281,8 +283,16 @@ class Microphone:
             self.scripts[tag] = []
 
         # append current recording to clip list according to tag
-        self.lastClip = self.getRecording()
-        self.clips[tag].append(self.lastClip)
+        lastClip = self.getRecording()
+        if lastClip is not None:
+            self.lastClip = lastClip
+            self.clips[tag].append(lastClip)
+        else:
+            # if no recording, return the correct number of items
+            if transcribe:
+                return None, None
+            else:
+                return None
 
         # synonymise null values
         nullVals = (

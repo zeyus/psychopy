@@ -5,7 +5,7 @@
 """
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = [
@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 
+from psychopy.hardware.exceptions import DeviceNotConnectedError, ManagedDeviceError
 from psychopy.tools import systemtools as st
 from serial.tools import list_ports
 from psychopy import logging
@@ -26,37 +27,6 @@ import json
 from pathlib import Path
 
 __folder__ = Path(__file__).parent
-
-
-class ManagedDeviceError(BaseException):
-    """
-    Exception arising from a managed device, which will include information about the device from
-    DeviceManager.
-    """
-    def __init__(self, msg, deviceName, traceback=None):
-        # create exception
-        BaseException.__init__(self, msg)
-        # store device name
-        self.deviceName = deviceName
-        # store traceback
-        if traceback is not None:
-            self.traceback = traceback
-        else:
-            self.traceback = self.__traceback__
-
-    def getJSON(self, asString=True):
-        tb = traceback.format_exception(type(self), self, self.traceback)
-        message = {
-            'type': "hardware_error",
-            'device': self.deviceName,
-            'msg': "".join(tb),
-            'context': getattr(self, "userdata", None)
-        }
-        # stringify if requested
-        if asString:
-            message = json.dumps(message)
-
-        return message
 
 
 class DeviceManager:
@@ -182,6 +152,9 @@ class DeviceManager:
         if deviceClass in (None, "*"):
             # resolve "any" flags to BaseDevice
             deviceClass = "psychopy.hardware.base.BaseDevice"
+        # if it's already a type, return as is
+        if isinstance(deviceClass, type):
+            return deviceClass
         # get package and class names from deviceClass string
         parts = deviceClass.split(".")
         pkgName = ".".join(parts[:-1])
@@ -248,6 +221,9 @@ class DeviceManager:
         try:
             # initialise device
             device = cls(*args, **kwargs)
+        except DeviceNotConnectedError as err:
+            # raise "not connected" errors as normal
+            raise err
         except Exception as err:
             # if initialization fails, generate a more informative ManagedDeviceError and return it
             raise ManagedDeviceError(
@@ -433,6 +409,12 @@ class DeviceManager:
         bool
             True if completed successfully
         """
+        # log an error and return False if device isn't added
+        if deviceName not in DeviceManager.devices:
+            logging.error(
+                f"Tried to remove device '{deviceName}' but there is no device by that name."
+            )
+            return False
         # get device object
         device = DeviceManager.devices[deviceName]
         # clear any listeners on it
@@ -521,48 +503,15 @@ class DeviceManager:
         """
         from psychopy import experiment
 
-        # dict in which to store usages
         usages = {}
-
-        def _process(emt):
-            """
-            Process an element (Component or Routine) for device names and append them to the
-            usages dict.
-
-            Parameters
-            ----------
-            emt : Component or Routine
-                Element to process
-            """
-            # if we have a device name for this element...
-            if "deviceLabel" in emt.params:
-                # get init value so it lines up with boilerplate code
-                inits = experiment.getInitVals(emt.params)
-                # get value
-                deviceName = inits['deviceLabel'].val
-                # make sure device name is in usages dict
-                if deviceName not in usages:
-                    usages[deviceName] = []
-                # add any new usages
-                for cls in getattr(emt, "deviceClasses", []):
-                    if cls not in usages[deviceName]:
-                        usages[deviceName].append(cls)
 
         # process each experiment
         for file in experiments:
             # create experiment object
             exp = experiment.Experiment()
             exp.loadFromXML(file)
-
-            # iterate through routines
-            for rt in exp.routines.values():
-                if isinstance(rt, experiment.routines.BaseStandaloneRoutine):
-                    # for standalone routines, get device names from params
-                    _process(rt)
-                else:
-                    # for regular routines, get device names from each component
-                    for comp in rt:
-                        _process(comp)
+            # get info
+            usages.update(exp.getRequiredDeviceNames())
 
         return usages
 
@@ -662,6 +611,7 @@ class DeviceManager:
         """
         # if deviceClass is *, call for all types
         if deviceClass == "*":
+            DeviceManager.importAllComponentDeviceClasses()
             deviceClass = DeviceManager.deviceClasses
         # if given multiple types, call for each
         if isinstance(deviceClass, (list, tuple)):
@@ -803,6 +753,29 @@ class DeviceManager:
             device.clearListeners()
 
         return True
+    
+    @staticmethod
+    def importAllComponentDeviceClasses():
+        """
+        For all known Components, import the relevant device classes so they appear in 
+        DeviceManager.deviceClasses
+        """
+        from psychopy.experiment import getAllElements
+
+        # iterate through all detectable elements
+        for emt in getAllElements().values():
+            # if possible, get relevant device classes
+            if hasattr(emt, "backends"):
+                for cls in emt.backends:
+                    if hasattr(cls, "deviceClass"):
+                        # import it so we can detect it
+                        try:
+                            DeviceManager._resolveClassString(cls.deviceClass)
+                        except:
+                            logging.warn(
+                                f"Failed to load class {cls.deviceClass} from specification in "
+                                f"{cls.__name__} ({emt.__name__})"
+                            )
 
     @staticmethod
     def getResponseParams(deviceClass="*"):

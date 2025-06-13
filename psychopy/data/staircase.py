@@ -55,23 +55,26 @@ class StairHandler(_BaseTrialHandler):
 
     """
 
-    def __init__(self,
-                 startVal,
-                 nReversals=None,
-                 stepSizes=4,  # dB stepsize
-                 nTrials=0,
-                 nUp=1,
-                 nDown=3,  # correct responses before stim goes down
-                 applyInitialRule=True,
-                 extraInfo=None,
-                 method='2AFC',
-                 stepType='db',
-                 minVal=None,
-                 maxVal=None,
-                 originPath=None,
-                 name='',
-                 autoLog=True,
-                 **kwargs):
+    def __init__(
+        self,
+        startVal,
+        nReversals=None,
+        stepSizes=4,  # dB stepsize
+        nTrials=0,
+        nUp=1,
+        nDown=3,  # correct responses before stim goes down
+        applyInitialRule=True,
+        extraInfo=None,
+        method='2AFC',
+        stepType='db',
+        minVal=None,
+        maxVal=None,
+        originPath=None,
+        isTrials=True,
+        name='',
+        autoLog=True,
+        **kwargs
+    ):
         """
         :Parameters:
 
@@ -136,6 +139,10 @@ class StairHandler(_BaseTrialHandler):
                 The largest legal value for the staircase, which can be
                 used to prevent it reaching impossible contrast values,
                 for instance.
+            
+            isTrials : bool
+                Is this controlling trials, or created for another purpose (e.g. iterating a 
+                stimulus within a trial)?
 
             Additional keyword arguments will be ignored.
 
@@ -155,6 +162,7 @@ class StairHandler(_BaseTrialHandler):
         self.extraInfo = extraInfo
         self.method = method
         self.stepType = stepType
+        self.isTrials = isTrials
 
         try:
             self.stepSizes = list(stepSizes)
@@ -1609,7 +1617,8 @@ class QuestPlusHandler(StairHandler):
 
         # if needed replace the existing intensity with this custom one
         if intensity is not None:
-            self.intensities.pop()
+            if len(self.intensities) != 0: # avoid error during the first trial where self.intensities will be of length 0, so pop does not work
+                self.intensities.pop()  # remove the auto-generated one
             self.intensities.append(intensity)
         # add the current data to experiment if possible
         if self.getExp() is not None:
@@ -1735,9 +1744,18 @@ class QuestPlusHandler(StairHandler):
 
 class MultiStairHandler(_BaseTrialHandler):
 
-    def __init__(self, stairType='simple', method='random',
-                 conditions=None, nTrials=50, randomSeed=None,
-                 originPath=None, name='', autoLog=True):
+    def __init__(
+        self, 
+        stairType='simple', 
+        method='random',
+        conditions=None, 
+        nTrials=50, 
+        randomSeed=None,
+        originPath=None, 
+        isTrials=True,
+        name='', 
+        autoLog=True,
+    ):
         """A Handler to allow easy interleaved staircase procedures
         (simple or QUEST).
 
@@ -1789,6 +1807,10 @@ class MultiStairHandler(_BaseTrialHandler):
                 The seed with which to initialize the random number generator
                 (RNG). If `None` (default), do not initialize the RNG with
                 a specific value.
+            
+            isTrials : bool
+                Is this controlling trials, or created for another purpose (e.g. iterating a 
+                stimulus within a trial)?
 
         Example usage::
 
@@ -1828,6 +1850,7 @@ class MultiStairHandler(_BaseTrialHandler):
         self.nTrials = nTrials
         self.finished = False
         self.totalTrials = 0
+        self.isTrials = isTrials
         self._checkArguments()
         # create staircases
         self.staircases = []  # all staircases

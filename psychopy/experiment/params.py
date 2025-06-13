@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Experiment classes:
@@ -16,6 +16,7 @@ The code that writes out a *_lastrun.py experiment file is (in order):
     settings.SettingsComponent.writeEndCode()
 """
 import functools
+import json
 from xml.etree.ElementTree import Element
 
 import re
@@ -51,11 +52,20 @@ inputDefaults = {
     'color': 'color',
 }
 
-# These are parameters which once existed but are no longer needed, so inclusion in this list will silence any "future
-# version" warnings
+
+# these are parameters which once existed but are no longer needed, so inclusion in this list will 
+# silence any "future version" warnings
 legacyParams = [
-    'lineColorSpace', 'borderColorSpace', 'fillColorSpace', 'foreColorSpace',  # 2021.1, we standardised colorSpace to be object-wide rather than param-specific
+    # settings params from the early days of PsychoJS
+    "JS libs", "OSF Project ID"
+    # in 2021.1, we standardised colorSpace to be object-wide rather than param-specific
+    "lineColorSpace", "borderColorSpace", "fillColorSpace", "foreColorSpace", 
+    # in 2024.2.0, we removed some superfluous params from the pupil labs backend
+    "plCompanionRecordingEnabled", "plPupilCaptureRecordingEnabled",
+    # from 2025.1, latency priority is handled by SpeakerDevice
+    "Audio latency priority",
 ]
+
 
 class Param():
     r"""Defines parameters for Experiment Components
@@ -370,7 +380,35 @@ class Param():
 
     def __deepcopy__(self, memo):
         return self.copy()
-
+    
+    @classmethod
+    def fromJSON(cls, data):
+        # initialise
+        param = Param(
+            "",
+            "code",
+        )
+        # apply
+        param.applyJSON(data)
+    
+    def applyJSON(self, data):
+        if "val" in data:
+            self.val = data['val']
+        if "valType" in data:
+            self.valType = data['valType']
+        if "updates" in data:
+            self.updates = "{}".format(data['updates'])
+        if "plugin" in data:
+            self.plugin = "{}".format(data['plugin'])
+    
+    def toJSON(self):
+        return {
+            'val': self.val,
+            'valType': self.valType,
+            'updates': "{}".format(self.updates),
+            'plugin': "{}".format(self.plugin)
+        }
+    
     @property
     def _xml(self):
         # Make root element

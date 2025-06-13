@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2024 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Experiment classes:
@@ -117,6 +117,7 @@ class Experiment:
     Routine. The Flow controls how Routines are organised
     e.g. the nature of repeats and branching of an experiment.
     """
+    
 
     def __init__(self, prefs=None):
         super(Experiment, self).__init__()
@@ -146,6 +147,9 @@ class Experiment:
         self.requireImport(importName='keyboard',
                            importFrom='psychopy.hardware')
 
+        # what online resources are needed? (PsychoJS only)
+        self.requiredResources = []
+
         _settingsComp = getComponents(fetchIcons=False)['SettingsComponent']
         self.settings = _settingsComp(parentName='', exp=self)
         # this will be the xml.dom.minidom.doc object for saving
@@ -162,6 +166,11 @@ class Experiment:
         self._expHandler = TrialHandler(exp=self, name='thisExp')
         self._expHandler.type = 'ExperimentHandler'  # true at run-time
 
+        # get a local reference of all Components and Routines (refreshed on loading a new file)
+        self.allCompons = getAllComponents(
+            self.prefsBuilder['componentsFolders'], fetchIcons=False)
+        self.allRoutines = getAllStandaloneRoutines(fetchIcons=False)
+
     def __eq__(self, other):
         if isinstance(other, Experiment):
             # if another experiment, compare filenames
@@ -172,6 +181,27 @@ class Experiment:
         else:
             # if neither, it's not the same
             return False
+    
+    def requireOnlineResource(self, url, name=None):
+        """
+        Add a link to an online resource to be loaded at experiment start in PsychoJS.
+
+        Parameters
+        ----------
+        url : str
+            Link to the necessary resource
+        name : str
+            Name with which to refer to the resource later in the experiment. Leave as None to use 
+            the url as its name.
+        """
+        # use url for name if none given
+        if name is None:
+            name = url
+        # add resource
+        self.requiredResources.append({
+            'name': name,
+            'rel': url,
+        })
 
     def requirePsychopyLibs(self, libs=()):
         """Add a list of top-level psychopy libs that the experiment
@@ -553,6 +583,14 @@ class Experiment:
         name = paramNode.get('name')
         valType = paramNode.get('valType')
         val = paramNode.get('val')
+        # 
+        # get knowwn legacy params for the current Component
+        componentLegacyParams = []
+        if componentNode is not None:
+            if componentNode.tag in self.allCompons:
+                componentLegacyParams = self.allCompons[componentNode.tag].legacyParams
+            if componentNode.tag in self.allRoutines:
+                componentLegacyParams = self.allRoutines[componentNode.tag].legacyParams
         # many components need web char newline replacement
         if not name == 'advancedParams':
             val = val.replace("&#10;", "\n")
@@ -703,6 +741,10 @@ class Experiment:
             else:
                 if name in params:
                     params[name].val = val
+                elif name in legacyParams + componentLegacyParams:
+                    # don't warn people if we know it's OK (e.g. for params
+                    # that have been removed
+                    return recognised
                 else:
                     # we found an unknown parameter (probably from the future)
                     params[name] = Param(
@@ -716,11 +758,7 @@ class Experiment:
                     params[name].allowedTypes = paramNode.get('allowedTypes')
                     if params[name].allowedTypes is None:
                         params[name].allowedTypes = []
-                    if name in legacyParams + ['JS libs', 'OSF Project ID']:
-                        # don't warn people if we know it's OK (e.g. for params
-                        # that have been removed
-                        pass
-                    elif componentNode is not None and componentNode.get("plugin", False):
+                    if componentNode is not None and componentNode.get("plugin", False) not in (False, "", "None", None):
                         # is param unrecognised because it's from a plugin?
                         params[name].categ = "Plugin"
                         params[name].plugin = componentNode.get("plugin", False)
@@ -770,6 +808,34 @@ class Experiment:
         exp.loadFromXML(filename)
 
         return exp
+
+    def _getValidRoutineName(self, routineNode, modifiedNames):
+        """
+        Find valid routine name
+        
+        Parameters
+        ----------
+        routineNode : Routine
+            Routine, Standalone Routine, or Unknown Routine node being read
+            from XML file
+        modifiedNames : List[str]
+            Names that have been modified within the XML file
+
+        Modifies:
+        -------
+        modifiedNames : List[str]
+            Appends name (str) if name was changed
+
+        Returns
+        -------
+        routineGoodName : str
+            Validated name of routine being added, meaning no duplicate names
+        """
+        routineGoodName = self.namespace.makeValid(routineNode.get('name'))
+        if routineGoodName != routineNode.get('name'):
+            modifiedNames.append(routineNode.get('name'))
+        self.namespace.add(routineGoodName)
+        return routineGoodName
 
     def loadFromXML(self, filename):
         """Loads an xml file and parses the builder Experiment from it
@@ -821,17 +887,13 @@ class Experiment:
             self.setExpName(shortName)
         # fetch routines
         routinesNode = root.find('Routines')
-        allCompons = getAllComponents(
+        self.allCompons = allCompons = getAllComponents(
             self.prefsBuilder['componentsFolders'], fetchIcons=False)
-        allRoutines = getAllStandaloneRoutines(fetchIcons=False)
+        self.allRoutines = allRoutines = getAllStandaloneRoutines(fetchIcons=False)
         # get each routine node from the list of routines
         for routineNode in routinesNode:
             if routineNode.tag == "Routine":
-                routineGoodName = self.namespace.makeValid(
-                    routineNode.get('name'))
-                if routineGoodName != routineNode.get('name'):
-                    modifiedNames.append(routineNode.get('name'))
-                self.namespace.user.append(routineGoodName)
+                routineGoodName = self._getValidRoutineName(routineNode, modifiedNames)
                 routine = Routine(name=routineGoodName, exp=self)
                 # self._getXMLparam(params=routine.params, paramNode=routineNode)
                 self.routines[routineNode.get('name')] = routine
@@ -899,12 +961,13 @@ class Experiment:
                     if component not in routine:
                         routine.append(component)
             else:
+                routineGoodName = self._getValidRoutineName(routineNode, modifiedNames)
                 if routineNode.tag in allRoutines:
                     # If not a routine, may be a standalone routine
-                    routine = allRoutines[routineNode.tag](exp=self, name=routineNode.get('name'))
+                    routine = allRoutines[routineNode.tag](exp=self, name=routineGoodName)
                 else:
                     # Otherwise treat as unknown
-                    routine = allRoutines['UnknownRoutine'](exp=self, name=routineNode.get('name'))
+                    routine = allRoutines['UnknownRoutine'](exp=self, name=routineGoodName)
                 # Apply all params
                 for paramNode in routineNode:
                     if paramNode.tag == "Param":
@@ -1085,6 +1148,56 @@ class Experiment:
     def htmlFolder(self):
         return self.settings.params['HTML path'].val
 
+    def getRequiredDeviceNames(self):
+        """
+        Get the device names which need to be defined for this experiment to run, along with a list 
+        of possible types for each one.
+
+        Returns
+        -------
+        dict[str: list[str]]
+            Device names and a list of possible types for each one
+        """
+        # dict in which to store usages
+        usages = {}
+
+        def _process(emt):
+            """
+            Process an element (Component or Routine) for device names and append them to the
+            usages dict.
+
+            Parameters
+            ----------
+            emt : Component or Routine
+                Element to process
+            """
+            # if we have a device name for this element...
+            if "deviceLabel" in emt.params:
+                # get init value so it lines up with boilerplate code
+                inits = getInitVals(emt.params)
+                # get value
+                deviceName = inits['deviceLabel'].val
+                # make sure device name is in usages dict
+                if deviceName not in usages:
+                    usages[deviceName] = []
+                # add any new usages
+                for cls in getattr(emt, "deviceClasses", []):
+                    if cls not in usages[deviceName]:
+                        usages[deviceName].append(cls)
+        
+        # iterate through routines
+        for rt in self.routines.values():
+            if isinstance(rt, BaseStandaloneRoutine):
+                # for standalone routines, get device names from params
+                _process(rt)
+            else:
+                # for regular routines, get device names from each component
+                for comp in rt:
+                    _process(comp)
+        
+        return usages
+
+
     def getComponentFromName(self, name):
         """Searches all the Routines in the Experiment for a matching Comp name
 
@@ -1149,10 +1262,6 @@ class Experiment:
             else:
                 thisFile['rel'] = filePath
                 thisFile['abs'] = os.path.normpath(join(srcRoot, filePath))
-                if "/" in filePath:
-                    thisFile['name'] = filePath.split("/")[-1]
-                else:
-                    thisFile['name'] = filePath
                 if len(thisFile['abs']) <= 256 and os.path.isfile(thisFile['abs']):
                     return thisFile
 
@@ -1309,7 +1418,7 @@ class Experiment:
                 chosenResources.append(thisFile)
 
         # Check for any resources not in experiment path
-        resources = loopResources + compResources + chosenResources
+        resources = loopResources + compResources + chosenResources + self.requiredResources
         resources = [res for res in resources if res is not None]
         for res in resources:
             if res in list(ft.defaultStim):
